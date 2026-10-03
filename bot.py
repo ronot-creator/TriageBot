@@ -4,6 +4,8 @@ import logging
 import json
 import re
 import asyncio
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from collections import defaultdict, deque
 from typing import Dict, Optional, Tuple, List
 
@@ -14,11 +16,27 @@ from telegram.ext import (
     ChatMemberHandler,
     CommandHandler,
     ContextTypes,
-    ConversationHandler,
     MessageHandler,
     CallbackQueryHandler,
     filters,
 )
+
+# ---------------------------------------------------------------------------
+# Embedded Health Check Server for Render + UptimeRobot
+# ---------------------------------------------------------------------------
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is operational.")
+
+    def log_message(self, format, *args):
+        return  # Suppress HTTP access logging to keep console clean
+
+def start_health_check_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
 
 # ---------------------------------------------------------------------------
 # Logging Setup
@@ -43,21 +61,16 @@ LLM_MODEL = "google/gemini-2.0-flash-lite-001"
 # ---------------------------------------------------------------------------
 # Global State & Memory
 # ---------------------------------------------------------------------------
-# Expanded context window from 5 to 10 based on engineering review
 GROUP_CONTEXTS: Dict[int, deque] = defaultdict(lambda: deque(maxlen=10))
-
-# In-memory cache for keywords to prevent SQLite I/O bottlenecks on every message
 ACTIVE_KEYWORDS_CACHE: List[str] = []
 
 # ---------------------------------------------------------------------------
-# Database Management (Robust State Persistence)
+# Database Management
 # ---------------------------------------------------------------------------
 def init_db():
-    """Initializes tables and populates default keywords if empty."""
     conn = sqlite3.connect("triage_system.db")
     cursor = conn.cursor()
     
-    # Blacklist Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS blacklist (
             user_id INTEGER PRIMARY KEY,
@@ -67,7 +80,6 @@ def init_db():
         )
     """)
     
-    # Config Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS config (
             key TEXT PRIMARY KEY,
@@ -75,7 +87,6 @@ def init_db():
         )
     """)
     
-    # Smart Keywords Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS smart_keywords (
             word TEXT PRIMARY KEY,
@@ -84,7 +95,6 @@ def init_db():
         )
     """)
     
-    # Seed default keywords if table is empty
     cursor.execute("SELECT COUNT(*) FROM smart_keywords")
     if cursor.fetchone()[0] == 0:
         default_words = [
@@ -96,18 +106,15 @@ def init_db():
             
     conn.commit()
     conn.close()
-    
     refresh_keywords_cache()
 
 def refresh_keywords_cache():
-    """Loads keywords from SQLite into high-speed memory."""
     global ACTIVE_KEYWORDS_CACHE
     conn = sqlite3.connect("triage_system.db")
     cursor = conn.cursor()
     cursor.execute("SELECT word FROM smart_keywords")
     ACTIVE_KEYWORDS_CACHE = [row[0].lower() for row in cursor.fetchall()]
     conn.close()
-    logger.info(f"Loaded {len(ACTIVE_KEYWORDS_CACHE)} smart keywords into cache.")
 
 def add_smart_keyword(word: str, admin_name: str) -> bool:
     word = word.lower().strip()
@@ -120,7 +127,7 @@ def add_smart_keyword(word: str, admin_name: str) -> bool:
         refresh_keywords_cache()
         return True
     except sqlite3.IntegrityError:
-        return False # Word already exists
+        return False
 
 def remove_smart_keyword(word: str) -> bool:
     word = word.lower().strip()
@@ -167,7 +174,7 @@ def ban_user(user_id: int, username: str, reason: str = "Overuse / Spam"):
     conn.close()
 
 # ---------------------------------------------------------------------------
-# Dynamic Group Tracking Logic
+# Dynamic Group Tracking
 # ---------------------------------------------------------------------------
 def update_dynamic_leader_status(chat_id: int, chat_title: str):
     if not chat_title:
@@ -186,18 +193,14 @@ async def track_group_events(update: Update, context: ContextTypes.DEFAULT_TYPE)
         update_dynamic_leader_status(chat.id, chat.title)
 
 # ---------------------------------------------------------------------------
-# Admin Commands (For Leaders to manage Database dynamically)
+# Admin Commands
 # ---------------------------------------------------------------------------
 async def cmd_addword(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Command to add a new smart listener keyword (Admin/Leader only)."""
-    # Security check: Ensure command is run in the leader group or by an admin
     if update.effective_chat.id != get_leader_group_id():
         return
-    
     if not context.args:
         await update.message.reply_text("استخدم: /addword الكلمة")
         return
-        
     word = context.args[0]
     success = add_smart_keyword(word, update.message.from_user.first_name)
     if success:
@@ -206,14 +209,11 @@ async def cmd_addword(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"⚠️ الكلمة '{word}' موجودة بالفعل.")
 
 async def cmd_delword(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Command to remove a smart listener keyword."""
     if update.effective_chat.id != get_leader_group_id():
         return
-        
     if not context.args:
         await update.message.reply_text("استخدم: /delword الكلمة")
         return
-        
     word = context.args[0]
     success = remove_smart_keyword(word)
     if success:
@@ -222,30 +222,27 @@ async def cmd_delword(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ الكلمة '{word}' غير موجودة.")
 
 async def cmd_listwords(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lists all active smart keywords."""
     if update.effective_chat.id != get_leader_group_id():
         return
     words = ", ".join(ACTIVE_KEYWORDS_CACHE)
     await update.message.reply_text(f"📝 **الكلمات المفتاحية النشطة:**\n{words}", parse_mode="Markdown")
 
 # ---------------------------------------------------------------------------
-# AI Engine: OpenRouter Gemini Evaluator
+# AI Engine
 # ---------------------------------------------------------------------------
 async def evaluate_triage(user_name: str, target_text: str, context_logs: str) -> dict:
     prompt = f"""
     You are an AI Triage Assistant for medical student leaders.
     Analyze the request in Egyptian Ameya/Arabic/English.
 
-    Context Messages (Last 10 messages - Warning: May contain unrelated noisy chatter):
+    Context Messages (Last 10 messages):
     {context_logs if context_logs else "No context"}
     
     Target Request:
     "{target_text}"
 
     Tasks:
-    1. Determine urgency: URGENT, MID, or LOW. 
-       - CRITICAL: Filter out context noise. Only grade based on the Target Request's true intent.
-       - Use LOW for absolute spam/chatter or questions already clearly answered in the context.
+    1. Determine urgency: URGENT, MID, or LOW.
     2. Provide a concise Arabic summary.
     3. Reason for classification.
 
@@ -263,7 +260,6 @@ async def evaluate_triage(user_name: str, target_text: str, context_logs: str) -
             timeout=20.0
         )
         raw_text = response.choices[0].message.content.strip()
-        
         json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
         if json_match:
             return json.loads(json_match.group(0))
@@ -279,7 +275,7 @@ async def evaluate_triage(user_name: str, target_text: str, context_logs: str) -
         }
 
 # ---------------------------------------------------------------------------
-# Group Interaction & Smart Listener
+# Group Interaction & Routing
 # ---------------------------------------------------------------------------
 async def handle_group_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
@@ -294,10 +290,8 @@ async def handle_group_messages(update: Update, context: ContextTypes.DEFAULT_TY
     text_lower = text.lower()
     mention_tag = f"@{bot_username}"
 
-    # Prepare rolling context
     recent_msgs = list(GROUP_CONTEXTS[chat.id])
     
-    # CASE 1: Bot is explicitly mentioned
     if mention_tag in text:
         clean_request = text.replace(mention_tag, "").strip()
         reply_context = ""
@@ -317,7 +311,6 @@ async def handle_group_messages(update: Update, context: ContextTypes.DEFAULT_TY
         triage_data = await evaluate_triage(message.from_user.full_name, clean_request, context_str)
         await route_ticket(triage_data, message, context, processing_msg, explicit_mention=True)
 
-    # CASE 2: Smart Listener (Checks against DB-backed Cache)
     elif any(kw in text_lower for kw in ACTIVE_KEYWORDS_CACHE):
         GROUP_CONTEXTS[chat.id].append(f"[{message.from_user.first_name}]: {text}")
         
@@ -397,26 +390,27 @@ async def handle_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 # ---------------------------------------------------------------------------
-# Main App Initialization
+# Main Execution
 # ---------------------------------------------------------------------------
 def main():
     if not TELEGRAM_BOT_TOKEN or not OPENROUTER_API_KEY:
         raise ValueError("CRITICAL: Missing API Keys in Environment Variables.")
 
+    # Start health check server for Render port binding
+    threading.Thread(target=start_health_check_server, daemon=True).start()
+
     init_db()
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Admin Commands
     app.add_handler(CommandHandler("addword", cmd_addword))
     app.add_handler(CommandHandler("delword", cmd_delword))
     app.add_handler(CommandHandler("listwords", cmd_listwords))
 
-    # Core Handlers
     app.add_handler(ChatMemberHandler(track_group_events, ChatMemberHandler.MY_CHAT_MEMBER))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & (~filters.COMMAND), handle_group_messages))
     app.add_handler(CallbackQueryHandler(handle_callbacks))
 
-    logger.info("🟢 SVU Med Triage Bot Started (Dynamic DB & Expanded Context)!")
+    logger.info("🟢 SVU Med Triage Bot Started Successfully!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
