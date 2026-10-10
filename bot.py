@@ -33,11 +33,12 @@ import logging
 import os
 import re
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Literal, Optional
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Thread
+
 from google import genai
 from google.genai import types
 from libsql_client import create_client_sync
@@ -97,12 +98,33 @@ if not TURSO_URL and not ALLOW_LOCAL_DB:
         "For local-only testing, set ALLOW_LOCAL_DB=1."
     )
 
+# libsql-client's legacy libsql:// transport uses WebSockets. Try HTTPS for
+# the same Turso endpoint; keep the Render environment variable unchanged.
+if TURSO_URL:
+    if not TURSO_TOKEN:
+        raise RuntimeError("TURSO_AUTH_TOKEN is required for a remote Turso database.")
+    if TURSO_URL.startswith("libsql://"):
+        DB_URL = "https://" + TURSO_URL[len("libsql://"):]
+    elif TURSO_URL.startswith("https://"):
+        DB_URL = TURSO_URL
+    else:
+        raise RuntimeError(
+            "Unsupported TURSO_DATABASE_URL scheme. Expected libsql:// or https://."
+        )
+else:
+    DB_URL = "file:triage_local.db"
+
 db = create_client_sync(
-    url=TURSO_URL if TURSO_URL else "file:triage_local.db",
+    url=DB_URL,
     auth_token=TURSO_TOKEN if TURSO_URL else None,
 )
 gemini = genai.Client(api_key=GEMINI_API_KEY)
 gemini_async = gemini.aio
+
+# Render liveness and readiness state. Liveness stays healthy while startup
+# dependencies initialize; readiness becomes healthy only after DB + Telegram.
+DB_READY = False
+BOT_READY = False
 
 # Context only includes messages observed since this process started.
 CHAT_CONTEXT: dict[int, deque[dict]] = defaultdict(lambda: deque(maxlen=CONTEXT_LIMIT))
@@ -200,6 +222,8 @@ def init_db() -> None:
             (keyword, now),
         )
     _exec("INSERT OR IGNORE INTO config(key, value) VALUES ('leader_chat_id', '')")
+    # Bound deduplication-table growth without deleting tickets or FAQ history.
+    _exec("DELETE FROM processed_messages WHERE processed_at < datetime('now', '-30 days')")
     log.info("Database schema initialized.")
 
 def utc_now() -> str:
@@ -300,13 +324,25 @@ def get_faq(faq_id: int):
     return result.rows[0] if result.rows else None
 
 def reserve_daily_request() -> bool:
+    """Atomically reserve one daily Gemini request across concurrent handlers."""
     day = datetime.now(timezone.utc).date().isoformat()
     _exec("INSERT OR IGNORE INTO api_usage(usage_date, requests) VALUES (?, 0)", (day,))
-    row = _exec("SELECT requests FROM api_usage WHERE usage_date=?", (day,)).rows[0]
-    if int(row[0]) >= RPD_LIMIT:
-        return False
-    _exec("UPDATE api_usage SET requests=requests+1 WHERE usage_date=?", (day,))
-    return True
+    result = _exec(
+        "UPDATE api_usage SET requests=requests+1 "
+        "WHERE usage_date=? AND requests < ?",
+        (day, RPD_LIMIT),
+    )
+    return int(getattr(result, "rows_affected", 0)) == 1
+
+
+def claim_message_for_processing(chat_id: int, message_id: int) -> bool:
+    """Atomically claim a message; only the insert winner may process it."""
+    result = _exec(
+        "INSERT OR IGNORE INTO processed_messages(chat_id, message_id, processed_at) "
+        "VALUES (?, ?, ?)",
+        (chat_id, message_id, utc_now()),
+    )
+    return int(getattr(result, "rows_affected", 0)) == 1
 
 # ----------------------------- Text helpers ------------------------------
 
@@ -473,8 +509,10 @@ async def get_media_part(message: Message):
         return None, mime_type, "تعذر تنزيل الملف لفحصه."
 
 async def wait_for_rpm_slot() -> None:
-    async with AI_RATE_LOCK:
-        while True:
+    # Never sleep while holding the lock: otherwise one queued request blocks
+    # every other handler from re-checking the rolling window.
+    while True:
+        async with AI_RATE_LOCK:
             now = time.monotonic()
             while AI_REQUEST_TIMES and now - AI_REQUEST_TIMES[0] >= 60:
                 AI_REQUEST_TIMES.popleft()
@@ -482,7 +520,7 @@ async def wait_for_rpm_slot() -> None:
                 AI_REQUEST_TIMES.append(now)
                 return
             wait_seconds = max(0.1, 60 - (now - AI_REQUEST_TIMES[0]))
-            await asyncio.sleep(wait_seconds)
+        await asyncio.sleep(wait_seconds)
 
 async def call_gemini(
     message: Message,
@@ -674,24 +712,18 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if not triggered:
         return
 
-    # Avoid repeated Gemini calls for duplicate updates/retries.
+    # Atomic deduplication: concurrent retries cannot both start Gemini calls.
     try:
-        seen = await asyncio.to_thread(
-            lambda: bool(_exec(
-                "SELECT 1 FROM processed_messages WHERE chat_id=? AND message_id=?",
-                (message.chat_id, message.message_id),
-            ).rows)
+        claimed = await asyncio.to_thread(
+            claim_message_for_processing, message.chat_id, message.message_id
         )
-        if seen:
+        if not claimed:
             return
-        await asyncio.to_thread(
-            lambda: _exec(
-                "INSERT OR IGNORE INTO processed_messages(chat_id, message_id, processed_at) VALUES (?, ?, ?)",
-                (message.chat_id, message.message_id, utc_now()),
-            )
-        )
     except Exception:
-        log.exception("Deduplication storage failed; continuing once.")
+        # Fail closed here: database trouble must not trigger unbounded duplicate
+        # AI calls. The next Telegram retry can be processed after DB recovery.
+        log.exception("Deduplication storage failed; skipping this message safely.")
+        return
 
     hint, cleaned = urgency_hint_and_clean_text(raw_text)
     # Keep original text intact in the prompt and ticket. Cleaned text is only a readable supplement.
@@ -994,48 +1026,52 @@ async def ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.error("Unhandled Telegram handler error: %s", context.error, exc_info=context.error)
 
-# --------------------------- Render Health Check -------------------------
+# ----------------------------- Render health server ----------------------
 
 class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
+    def do_GET(self) -> None:
         path = self.path.split("?", 1)[0]
-
-        if path not in ("/", "/health"):
-            self.send_error(404)
-            return
-
-        body = b"OK"
-        self.send_response(200)
+        if path in ("/", "/health/live"):
+            status, body = 200, b"OK"
+        elif path == "/health/ready":
+            ready = DB_READY and BOT_READY
+            status, body = (200, b"READY") if ready else (503, b"NOT READY")
+        else:
+            status, body = 404, b"NOT FOUND"
+        self.send_response(status)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, format, *args):
-        pass
+    def log_message(self, format: str, *args) -> None:
+        # Avoid noisy health-check access logs on Render.
+        return
 
 
 def start_health_server() -> None:
-    port = int(os.environ.get("PORT", "10000"))
+    port = int(os.getenv("PORT", "10000"))
     server = ThreadingHTTPServer(("0.0.0.0", port), HealthHandler)
-    Thread(target=server.serve_forever, daemon=True).start()
-    log.info("Render health server listening on port %s", port)
+    Thread(target=server.serve_forever, name="render-health", daemon=True).start()
+    log.info("Health server listening on port %s", port)
+
 
 # ----------------------------- Entrypoint --------------------------------
 
 def main() -> None:
-    global BOT_USERNAME
-    init_db()
+    global BOT_USERNAME, DB_READY, BOT_READY
     start_health_server()
-    app = Application.builder().token(BOT_TOKEN).build()
+    init_db()
+    DB_READY = True
 
     async def post_init(application: Application) -> None:
-        global BOT_USERNAME
+        global BOT_USERNAME, BOT_READY
         me = await application.bot.get_me()
         BOT_USERNAME = me.username
+        BOT_READY = True
         log.info("Bot started as @%s; Gemini model=%s", BOT_USERNAME, MODEL_NAME)
 
-    app.post_init = post_init
+    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("setleaders", setleaders_command))
