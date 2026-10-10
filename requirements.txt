@@ -1,4 +1,6 @@
-python-telegram-bot
 requests
-google-generativeai
 openai
+python-telegram-bot>=22.0,<23.0
+google-genai>=1.0.0
+libsql-client>=0.3.1
+pydantic>=2.0,<3.0
