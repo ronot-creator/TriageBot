@@ -36,7 +36,8 @@ import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Literal, Optional
-
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 from google import genai
 from google.genai import types
 from libsql_client import create_client_sync
@@ -993,11 +994,39 @@ async def ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.error("Unhandled Telegram handler error: %s", context.error, exc_info=context.error)
 
+# --------------------------- Render Health Check -------------------------
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+
+        if path not in ("/", "/health"):
+            self.send_error(404)
+            return
+
+        body = b"OK"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        pass
+
+
+def start_health_server() -> None:
+    port = int(os.environ.get("PORT", "10000"))
+    server = ThreadingHTTPServer(("0.0.0.0", port), HealthHandler)
+    Thread(target=server.serve_forever, daemon=True).start()
+    log.info("Render health server listening on port %s", port)
+
 # ----------------------------- Entrypoint --------------------------------
 
 def main() -> None:
     global BOT_USERNAME
     init_db()
+    start_health_server()
     app = Application.builder().token(BOT_TOKEN).build()
 
     async def post_init(application: Application) -> None:
