@@ -846,7 +846,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 pass
         return
 
-    if result.action == "ANNOUNCEMENT_REPLY" and result.announcement_id is not None and result.confidence >= FAQ_CONFIDENCE_THRESHOLD:
+    if result.action == "ANNOUNCEMENT_REPLY" and result.urgency != "URGENT" and result.announcement_id is not None and result.confidence >= FAQ_CONFIDENCE_THRESHOLD:
         try:
             announcement = await asyncio.to_thread(announcement_by_id, db, result.announcement_id)
             if announcement and str(announcement[6]) == "relevant" and str(announcement[5]) in {"pending_review", "approved", "published"} and result.reply_ar.strip():
