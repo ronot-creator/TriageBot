@@ -90,9 +90,11 @@ FAQ_CONFIDENCE_THRESHOLD = float(os.getenv("FAQ_CONFIDENCE_THRESHOLD", "0.85"))
 ALLOW_LOCAL_DB = os.getenv("ALLOW_LOCAL_DB", "0").lower() in {"1", "true", "yes"}
 NEWS_CHANNEL_ID_RAW = os.getenv("NEWS_CHANNEL_ID", "").strip()
 DISCUSSION_GROUP_ID_RAW = os.getenv("DISCUSSION_GROUP_ID", "").strip()
+LEADER_IDS_RAW = os.getenv("LEADER_TELEGRAM_IDS", "").strip()
 FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "").strip()
 NEWS_CHANNEL_ID = int(NEWS_CHANNEL_ID_RAW) if NEWS_CHANNEL_ID_RAW.lstrip("-").isdigit() else None
 DISCUSSION_GROUP_ID = int(DISCUSSION_GROUP_ID_RAW) if DISCUSSION_GROUP_ID_RAW.lstrip("-").isdigit() else None
+LEADER_IDS = {int(value.strip()) for value in LEADER_IDS_RAW.split(",") if value.strip().isdigit()}
 
 if not BOT_TOKEN:
     raise RuntimeError("Missing TELEGRAM_BOT_TOKEN environment variable.")
@@ -526,7 +528,7 @@ async def is_leader(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     user = update.effective_user
     if not user:
         return False
-    if user.id == OWNER_ID:
+    if user.id == OWNER_ID or user.id in LEADER_IDS:
         return True
     leader_chat_id = get_leader_chat_id()
     if not leader_chat_id:
