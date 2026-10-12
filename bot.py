@@ -1117,12 +1117,12 @@ async def review_announcement(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not summary:
             await update.effective_message.reply_text("لا يوجد ملخص صالح. استخدم /editannouncement ID | الملخص.")
             return
+        if not DISCUSSION_GROUP_ID:
+            await update.effective_message.reply_text("DISCUSSION_GROUP_ID غير مضبوط؛ لم يتم اعتماد الإعلان أو نشره. اضبطه ثم أعد المحاولة.")
+            return
         changed = _exec("UPDATE announcements SET status='approved', approved_summary=?, reviewed_by=?, reviewed_at=?, updated_at=? WHERE id=? AND status='pending_review'", (summary[:4000], update.effective_user.id, utc_now(), utc_now(), announcement_id))
         if int(getattr(changed, "rows_affected", 0)) != 1:
             await update.effective_message.reply_text("تغيرت حالة الإعلان بالفعل؛ لم يتم النشر.")
-            return
-        if not DISCUSSION_GROUP_ID:
-            await update.effective_message.reply_text("تمت الموافقة والحفظ، لكن DISCUSSION_GROUP_ID غير مضبوط؛ لم يتم النشر.")
             return
         sent = await context.bot.send_message(chat_id=DISCUSSION_GROUP_ID, text=f"📢 <b>إعلان جامعي</b>\n{safe_html(summary[:3500])}\n\nالمصدر: {safe_html(str(source_link or ''))}", parse_mode="HTML", disable_web_page_preview=True)
         _exec("UPDATE announcements SET status='published', published_message_id=?, updated_at=? WHERE id=? AND status='approved'", (sent.message_id, utc_now(), announcement_id))
