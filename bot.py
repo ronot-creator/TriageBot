@@ -635,6 +635,7 @@ async def call_gemini(
 {announcement_payload}
 
 إذا لم تدعم المصادر المحفوظة الإجابة بوضوح، لا تخترع تاريخاً أو وقتاً أو مكاناً؛ اختر LEADER_REVIEW. لا تستخدم إعلاناً مصنفاً irrelevant أو غير موجود.
+"""
     contents = [prompt]
     if media_part is not None:
         contents.append(media_part)
