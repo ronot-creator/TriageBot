@@ -406,6 +406,24 @@ def matched_keyword(text: str, keywords: list[str]) -> Optional[str]:
             return keyword
     return None
 
+
+def looks_like_college_schedule_question(text: str) -> bool:
+    normalized = normalize_text(text)
+    schedule_terms = (
+        "timetable", "schedule", "lecture", "class", "lab", "practical", "exam",
+        "quiz", "room", "hall", "location", "deadline", "registration", "postponed",
+        "cancelled", "canceled", "moved", "جدول", "محاضره", "محاضرة", "محاضرات",
+        "عملي", "امتحان", "امتحانات", "قاعة", "مدرج", "مكان", "ميعاد", "مواعيد",
+        "اتلغي", "اتلغى", "تأجيل", "تسجيل", "داتا",
+    )
+    question_cues = (
+        "where", "when", "what time", "which room", "is there", "did they",
+        "فين", "امتى", "متى", "الساعة كام", "بكام", "هل", "مكان", "بكره", "بكرة",
+        "غدا", "بكرا", "؟", "?",
+    )
+    return any(term in normalized for term in schedule_terms) and any(cue in normalized for cue in question_cues)
+
+
 def user_display(message: Message) -> str:
     user = message.from_user
     if not user:
@@ -787,7 +805,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
     keywords = await asyncio.to_thread(get_active_keywords)
     keyword = matched_keyword(raw_text, keywords) if raw_text else None
-    triggered = mentioned or replied_to_bot or bool(keyword)
+    triggered = mentioned or replied_to_bot or bool(keyword) or looks_like_college_schedule_question(raw_text)
     if not triggered:
         return
 
