@@ -36,6 +36,7 @@ The importer deliberately rejects unknown headers, unparseable dates/times, and 
 3. Relevant-looking posts are saved with their original text and source link and sent to the leaders as drafts. Irrelevant posts are marked ignored.
 4. Leaders use `/pendingannouncements`, then `/approveannouncement ID`, `/editannouncement ID | corrected summary`, or `/rejectannouncement ID`.
 5. Summaries are only posted to the configured discussion group after explicit approval.
+6. When a student asks a triggered question, the bot may answer from relevant saved announcement records and include the source date/link. If no saved announcement supports the answer confidently, it falls back to the existing human-review flow.
 
 Telegram bot updates do not provide automatic backfill of all old channel history; ingestion starts with posts/edits received after the bot is correctly configured. Treat AI summaries as drafts and verify dates, places and times against the original post.
 
