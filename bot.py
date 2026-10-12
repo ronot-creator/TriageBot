@@ -1219,6 +1219,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
         "أوامر القيادة (داخل جروب القيادة أو بواسطة المالك):\n"
+        "/chatid — عرض الرقم الداخلي للجروب الحالي (للمالك فقط)\n"
         "/setleaders — ربط الجروب الحالي كجروب قيادة (للمالك فقط)\n"
         "/status — حالة الإعدادات والاستخدام\n"
         "/addword كلمة | /delword كلمة | /listwords\n"
@@ -1234,7 +1235,17 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "ملاحظة: القائمة السوداء تمنع البوت من معالجة رسائل المستخدم فقط؛ لا تطرده من تيليجرام."
     )
 
-async def setleaders_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def chatid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or update.effective_user.id != OWNER_ID:
+        await update.effective_message.reply_text("الأمر ده متاح لمالك البوت فقط.")
+        return
+    if not update.effective_chat or update.effective_chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
+        await update.effective_message.reply_text("استخدم /chatid داخل الجروب الذي تريد معرفة رقمه.")
+        return
+    await update.effective_message.reply_text(f"Chat ID: {update.effective_chat.id}")
+
+
+async def setleaders_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     message = update.effective_message
     if not update.effective_user or update.effective_user.id != OWNER_ID:
         await message.reply_text("الأمر ده متاح لمالك البوت فقط.")
@@ -1479,6 +1490,7 @@ def main() -> None:
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("chatid", chatid_command))
     app.add_handler(CommandHandler("setleaders", setleaders_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("addword", addword_command))
