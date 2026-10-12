@@ -6,6 +6,8 @@ Telegram college triage bot with durable Turso/libSQL storage.
 
 Required: `TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, and numeric `OWNER_TELEGRAM_ID`.
 
+Use `LEADER_TELEGRAM_IDS` for a comma-separated allowlist of trusted leader user IDs. This is safer than treating every member of the leaders' group as a privileged user; group creators/administrators are also recognized.
+
 Optional existing settings and the new college-data settings are documented in [`.env.example`](.env.example). Put real values in Render's environment settings, not in GitHub. `NEWS_CHANNEL_ID` and `DISCUSSION_GROUP_ID` must be numeric Telegram chat IDs, not invite links.
 
 ## Database migration
