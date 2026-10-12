@@ -201,14 +201,28 @@ def _read_rows(file_name: str, payload: bytes) -> list[list[Any]]:
         except ImportError as exc:
             raise ValueError("Excel import requires openpyxl to be installed.") from exc
         workbook = load_workbook(io.BytesIO(payload), read_only=True, data_only=True)
-        rows: list[list[Any]] = []
-        for sheet in workbook.worksheets:
-            for row in sheet.iter_rows(values_only=True):
-                vals = list(row)
-                if any(v is not None and str(v).strip() for v in vals):
-                    rows.append(vals)
-        workbook.close()
-        return rows
+        try:
+            sheet_rows: list[tuple[str, list[list[Any]]]] = []
+            for sheet in workbook.worksheets:
+                rows_for_sheet: list[list[Any]] = []
+                for row in sheet.iter_rows(values_only=True):
+                    vals = list(row)
+                    if any(v is not None and str(v).strip() for v in vals):
+                        rows_for_sheet.append(vals)
+                if rows_for_sheet:
+                    sheet_rows.append((sheet.title, rows_for_sheet))
+            if not sheet_rows:
+                return []
+            if len(sheet_rows) > 1:
+                names = ", ".join(name for name, _ in sheet_rows[:8])
+                raise ValueError(
+                    "This workbook has multiple non-empty sheets ("
+                    + names
+                    + "). Import each sheet separately for now so no timetable rows are silently skipped."
+                )
+            return sheet_rows[0][1]
+        finally:
+            workbook.close()
     raise ValueError("Supported timetable formats are .csv, .xlsx, and .xlsm. PDF/image import needs a layout-specific review step.")
 
 
