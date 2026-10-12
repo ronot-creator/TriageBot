@@ -406,8 +406,7 @@ def save_announcement(db: Any, *, chat_id: int, message_id: int, source_date: st
            ON CONFLICT(source_chat_id,source_message_id) DO UPDATE SET
              source_date=excluded.source_date, source_link=excluded.source_link, original_text=excluded.original_text,
              category=excluded.category, relevance=excluded.relevance, draft_summary=excluded.draft_summary,
-             status=CASE WHEN announcements.status='published' THEN 'published'
-                         WHEN excluded.relevance='relevant' THEN 'pending_review' ELSE 'ignored' END,
+             status=CASE WHEN excluded.relevance='relevant' THEN 'pending_review' ELSE 'ignored' END,
              updated_at=excluded.updated_at""",
         (chat_id, message_id, source_date, source_link, original_text[:20000], category[:100], relevance[:50], draft_summary[:5000], initial_status, now, now),
     )
