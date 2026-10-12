@@ -1400,7 +1400,7 @@ def main() -> None:
     app.add_handler(CommandHandler("editannouncement", editannouncement_command))
     app.add_handler(CommandHandler("rejectannouncement", rejectannouncement_command))
     app.add_handler(CallbackQueryHandler(timetable_callback, pattern=r"^(timetableapprove|timetablecancel):\d+$"))
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.Document.ALL, timetable_upload_handler), group=0)
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.Document.ALL, timetable_upload_handler), group=-1)
     app.add_handler(MessageHandler(filters.ChatType.CHANNEL, announcement_channel_handler), group=0)
     app.add_handler(CallbackQueryHandler(ticket_callback, pattern=r"^(claim|resolve|blacklist):\d+$"))
     # Group messages include plain text, captions, photos, video, voice/audio and documents.
