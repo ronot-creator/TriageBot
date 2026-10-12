@@ -950,8 +950,10 @@ async def timetable_upload_handler(update: Update, context: ContextTypes.DEFAULT
     for entry in parsed["entries"][:12]:
         preview.append(f"صف {entry['row_number']}: {entry['course']} | {entry['session_date'] or entry['weekday']} | {entry['start_time'] or '?'}–{entry['end_time'] or '?'} | {entry['location'] or 'المكان غير محدد'}")
     for error in parsed["errors"][:5]:
-        preview.append(f"تحذير صف {error['row']}: {error['reason']}")
-    preview += ["", "لم يتم إدخال أي محاضرة في الجدول النشط بعد. راجع المعاينة ثم اعتمد أو ألغِ."]
+        preview.append(f"صف مستبعد {error['row']}: {error['reason']}")
+    for warning in parsed.get("warnings", [])[:8]:
+        preview.append(f"تحقق من صف {warning['row']}: {warning['reason']}")
+    preview += ["", "لم يتم إدخال أي محاضرة في الجدول النشط بعد. راجع المعاينة والتحذيرات ثم اعتمد أو ألغِ."]
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("اعتماد الصفوف الصالحة", callback_data=f"timetableapprove:{import_id}"),
         InlineKeyboardButton("إلغاء الاستيراد", callback_data=f"timetablecancel:{import_id}"),
@@ -961,7 +963,12 @@ async def timetable_upload_handler(update: Update, context: ContextTypes.DEFAULT
 
 async def announcement_channel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
-    if not message or not update.effective_chat or not NEWS_CHANNEL_ID or update.effective_chat.id != NEWS_CHANNEL_ID:
+    if not message or not update.effective_chat:
+        return
+    if not NEWS_CHANNEL_ID:
+        log.warning("Channel post received from chat ID %s; set NEWS_CHANNEL_ID to enable announcement ingestion.", update.effective_chat.id)
+        return
+    if update.effective_chat.id != NEWS_CHANNEL_ID:
         return
     original = message_text(message)
     if not original:
