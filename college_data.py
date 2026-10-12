@@ -231,6 +231,7 @@ def parse_timetable(file_name: str, payload: bytes) -> dict[str, Any]:
         raise ValueError("Could not confidently identify headers. Use columns for Course, Date or Weekday, Start/Time, End, and Location.")
     parsed: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
     for source_idx, row in enumerate(rows[header_idx + 1:], start=header_idx + 2):
         def get(field: str) -> Any:
             idx = columns.get(field)
@@ -267,6 +268,12 @@ def parse_timetable(file_name: str, payload: bytes) -> dict[str, Any]:
         if not start:
             errors.append({"row": source_idx, "reason": "missing/unknown start time", "source": [str(x or "") for x in row]})
             continue
+        if not location:
+            warnings.append({"row": source_idx, "reason": "location/place is blank; verify before relying on this entry"})
+        if not end:
+            warnings.append({"row": source_idx, "reason": "end time is blank; verify session duration"})
+        if not str(get("type") or "").strip():
+            warnings.append({"row": source_idx, "reason": "session type is blank; source may not distinguish lecture/practical"})
         parsed.append({
             "row_number": source_idx,
             "course": course,
@@ -282,7 +289,7 @@ def parse_timetable(file_name: str, payload: bytes) -> dict[str, Any]:
         })
     if not parsed and not errors:
         raise ValueError("No usable timetable entries were detected.")
-    return {"entries": parsed, "errors": errors, "rows_seen": max(0, len(rows) - header_idx - 1)}
+    return {"entries": parsed, "errors": errors, "warnings": warnings, "rows_seen": max(0, len(rows) - header_idx - 1)}
 
 
 def save_timetable_preview(db: Any, file_name: str, payload: bytes, uploader_id: int, now: str) -> tuple[int, dict[str, Any]]:
@@ -321,7 +328,7 @@ def commit_timetable_import(db: Any, import_id: int, actor_id: int, now: str) ->
     entries = json.loads(raw_rows)
     for entry in entries:
         db.execute(
-            """INSERT INTO timetable_entries
+            """INSERT OR IGNORE INTO timetable_entries
                (import_id,row_number,course,session_type,session_date,weekday,start_time,end_time,location,instructor,notes,status,source_file,source_row_json,created_at,updated_at)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,'scheduled',?,?,?,?)""",
             (import_id, entry["row_number"], entry["course"], entry["session_type"], entry["session_date"],
