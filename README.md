@@ -41,6 +41,8 @@ The importer deliberately rejects unknown headers, unparseable dates/times, and 
 5. Summaries are only posted to the configured discussion group after explicit approval.
 6. When a student asks a triggered question, the bot may answer from relevant saved announcement records and include the source date/link. If no saved announcement supports the answer confidently, it falls back to the existing human-review flow.
 
+To find IDs: run `/chatid` as the owner inside the discussion group; set that value as both `DISCUSSION_GROUP_ID` and (recommended) `ALLOWED_GROUP_ID` if it is the student discussion group. For the news channel, add the bot as an administrator and publish a test post while `NEWS_CHANNEL_ID` is blank; the Render log records the numeric channel ID, which you can then add to the environment and redeploy.
+
 Telegram bot updates do not provide automatic backfill of all old channel history; ingestion starts with posts/edits received after the bot is correctly configured. Treat AI summaries as drafts and verify dates, places and times against the original post.
 
 ## Testing
