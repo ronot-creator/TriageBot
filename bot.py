@@ -652,6 +652,15 @@ async def call_gemini(
             retryable = any(token in error_text for token in ("429", "resource_exhausted", "quota", "rate limit", "too many requests"))
             if model_index + 1 < len(models_to_try) and retryable:
                 log.warning("Primary model %s hit a quota/rate limit; trying configured fallback %s.", model_name, models_to_try[model_index + 1])
+                try:
+                    await wait_for_rpm_slot()
+                    fallback_quota = await asyncio.to_thread(reserve_daily_request)
+                except Exception:
+                    log.exception("Could not reserve quota for the fallback model.")
+                    return None
+                if not fallback_quota:
+                    log.warning("Global daily request limit prevents fallback attempt.")
+                    return None
                 continue
             log.exception("Gemini request failed for model %s.", model_name)
             return None
@@ -971,6 +980,7 @@ async def announcement_channel_handler(update: Update, context: ContextTypes.DEF
     if update.effective_chat.id != NEWS_CHANNEL_ID:
         return
     original = message_text(message)
+    media_only = not bool(original)
     if not original:
         if not (message.photo or message.document or message.video):
             return
@@ -987,7 +997,7 @@ async def announcement_channel_handler(update: Update, context: ContextTypes.DEF
     except Exception:
         log.exception("Could not persist original channel post before classification.")
         return
-    if original.startswith("[مرفق في منشور القناة"):
+    if media_only:
         leader_chat_id = get_leader_chat_id()
         if leader_chat_id:
             await context.bot.send_message(chat_id=leader_chat_id,
