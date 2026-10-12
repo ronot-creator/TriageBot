@@ -434,3 +434,28 @@ def pending_announcements(db: Any, limit: int = 10) -> list[tuple]:
            FROM announcements WHERE status='pending_review' ORDER BY source_date DESC LIMIT ?""",
         (max(1, min(30, limit)),),
     ).rows)
+
+
+def announcements_for_context(db: Any, limit: int = 12) -> list[dict[str, Any]]:
+    rows = db.execute(
+        """SELECT id,source_date,source_link,original_text,draft_summary,status
+           FROM announcements
+           WHERE relevance='relevant' AND status IN ('pending_review','approved','published')
+           ORDER BY source_date DESC LIMIT ?""",
+        (max(1, min(20, limit)),),
+    ).rows
+    return [
+        {"id": int(row[0]), "source_date": str(row[1]), "source_link": str(row[2] or ""),
+         "original_text": str(row[3])[:5000], "draft_summary": str(row[4] or ""),
+         "status": str(row[5])}
+        for row in rows
+    ]
+
+
+def announcement_by_id(db: Any, announcement_id: int) -> tuple | None:
+    result = db.execute(
+        """SELECT id,source_date,source_link,original_text,draft_summary,status,relevance
+           FROM announcements WHERE id=?""",
+        (announcement_id,),
+    )
+    return result.rows[0] if result.rows else None
