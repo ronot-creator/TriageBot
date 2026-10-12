@@ -994,10 +994,11 @@ async def timetable_upload_handler(update: Update, context: ContextTypes.DEFAULT
     for warning in parsed.get("warnings", [])[:8]:
         preview.append(f"تحقق من صف {warning['row']}: {warning['reason']}")
     preview += ["", "لم يتم إدخال أي محاضرة في الجدول النشط بعد. راجع المعاينة والتحذيرات ثم اعتمد أو ألغِ."]
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("اعتماد الصفوف الصالحة", callback_data=f"timetableapprove:{import_id}"),
-        InlineKeyboardButton("إلغاء الاستيراد", callback_data=f"timetablecancel:{import_id}"),
-    ]])
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("إضافة الصفوف الصالحة", callback_data=f"timetableapprove:{import_id}")],
+        [InlineKeyboardButton("استبدال الجدول النشط بالكامل", callback_data=f"timetablereplace:{import_id}")],
+        [InlineKeyboardButton("إلغاء الاستيراد", callback_data=f"timetablecancel:{import_id}")],
+    ])
     await message.reply_text("\n".join(preview)[:3900], reply_markup=keyboard)
 
 
@@ -1158,12 +1159,14 @@ async def timetable_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     action, import_id = parts[0], int(parts[1])
     try:
-        if action == "timetableapprove":
-            count = await asyncio.to_thread(commit_timetable_import, db, import_id, update.effective_user.id, utc_now())
+        if action in {"timetableapprove", "timetablereplace"}:
+            replace_existing = action == "timetablereplace"
+            count = await asyncio.to_thread(commit_timetable_import, db, import_id, update.effective_user.id, utc_now(), replace_existing)
             await query.answer(f"تم اعتماد {count} صفاً.")
             if query.message:
                 await query.edit_message_reply_markup(reply_markup=None)
-                await query.message.reply_text(f"تم اعتماد استيراد الجدول #{import_id}: {count} جلسة. استخدم /timetable للبحث.")
+                suffix = " واستُبدلت السجلات النشطة القديمة مع حفظ سجل التغييرات" if replace_existing else " (إضافة دون حذف/استبدال السجلات السابقة)"
+                await query.message.reply_text(f"تم اعتماد استيراد الجدول #{import_id}: {count} جلسة{suffix}. استخدم /timetable للبحث.")
         elif action == "timetablecancel":
             await asyncio.to_thread(cancel_timetable_import, db, import_id, update.effective_user.id, utc_now())
             await query.answer("تم إلغاء الاستيراد.")
@@ -1464,7 +1467,7 @@ def main() -> None:
     app.add_handler(CommandHandler("approveannouncement", approveannouncement_command))
     app.add_handler(CommandHandler("editannouncement", editannouncement_command))
     app.add_handler(CommandHandler("rejectannouncement", rejectannouncement_command))
-    app.add_handler(CallbackQueryHandler(timetable_callback, pattern=r"^(timetableapprove|timetablecancel):\d+$"))
+    app.add_handler(CallbackQueryHandler(timetable_callback, pattern=r"^(timetableapprove|timetablereplace|timetablecancel):\d+$"))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.Document.ALL, timetable_upload_handler), group=-1)
     app.add_handler(MessageHandler(filters.ChatType.CHANNEL, announcement_channel_handler), group=0)
     app.add_handler(CallbackQueryHandler(ticket_callback, pattern=r"^(claim|resolve|blacklist):\d+$"))
