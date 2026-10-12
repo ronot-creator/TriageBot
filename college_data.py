@@ -340,6 +340,8 @@ def commit_timetable_import(db: Any, import_id: int, actor_id: int, now: str) ->
     if status != "pending":
         raise ValueError(f"Import is not pending (status={status}).")
     entries = json.loads(raw_rows)
+    if not entries:
+        raise ValueError("This import has no valid rows. Correct the source file and upload it again.")
     for entry in entries:
         db.execute(
             """INSERT OR IGNORE INTO timetable_entries
