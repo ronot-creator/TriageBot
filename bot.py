@@ -421,7 +421,16 @@ def looks_like_college_schedule_question(text: str) -> bool:
         "فين", "امتى", "متى", "الساعة كام", "بكام", "هل", "مكان", "بكره", "بكرة",
         "غدا", "بكرا", "؟", "?",
     )
-    return any(term in normalized for term in schedule_terms) and any(cue in normalized for cue in question_cues)
+    if not any(cue in normalized for cue in question_cues):
+        return False
+    if any(term in normalized for term in schedule_terms):
+        return True
+    # Also recognize questions that mention a course name stored in the timetable.
+    try:
+        courses = _exec("SELECT DISTINCT course FROM timetable_entries WHERE status='scheduled' LIMIT 100").rows
+        return any(normalize_text(str(row[0])) in normalized for row in courses if str(row[0]).strip())
+    except Exception:
+        return False
 
 
 def user_display(message: Message) -> str:
@@ -805,7 +814,8 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
     keywords = await asyncio.to_thread(get_active_keywords)
     keyword = matched_keyword(raw_text, keywords) if raw_text else None
-    triggered = mentioned or replied_to_bot or bool(keyword) or looks_like_college_schedule_question(raw_text)
+    schedule_question = await asyncio.to_thread(looks_like_college_schedule_question, raw_text) if raw_text else False
+    triggered = mentioned or replied_to_bot or bool(keyword) or schedule_question
     if not triggered:
         return
 
