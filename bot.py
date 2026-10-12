@@ -1245,7 +1245,7 @@ async def chatid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.effective_message.reply_text(f"Chat ID: {update.effective_chat.id}")
 
 
-async def setleaders_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
+async def setleaders_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     if not update.effective_user or update.effective_user.id != OWNER_ID:
         await message.reply_text("الأمر ده متاح لمالك البوت فقط.")
