@@ -1,7 +1,7 @@
 """
 SVU Med Triage Bot
 - Telegram group monitoring with local keyword scanning.
-- One Gemini request per triggered message (mention, keyword, or reply to bot).
+- One logical Gemini triage per triggered message, with optional configured quota fallback.
 - Durable Turso/libSQL storage for configuration, FAQs, tickets, blacklist, and API usage.
 - Leaders make final decisions; AI failures are escalated for human review.
 
@@ -842,7 +842,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
         media_problem = "نوع المرفق غير مدعوم للفحص التلقائي؛ يلزم فحص بشري."
     context_text = await asyncio.to_thread(make_context, message)
 
-    # One Gemini call maximum per triggered message.
+    # One logical triage per triggered message; a configured fallback may add one API attempt.
     result = await call_gemini(
         message, analysis_text, context_text, media_part, media_problem, hint
     )
