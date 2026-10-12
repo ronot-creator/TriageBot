@@ -23,7 +23,10 @@ New tables:
 
 1. Add the bot to the leaders' group and link it using `/setleaders` as the owner.
 2. Upload a `.csv`, `.xlsx`, or `.xlsm` timetable file in that leaders' group.
-3. Review the preview and validation warnings. No active timetable entries are written until a leader presses **Approve valid rows**.
+3. Review the preview and validation warnings. No active timetable entries are written until a leader chooses an action:
+   - **Add valid rows** keeps existing active records and adds these sessions.
+   - **Replace active timetable** marks all previous scheduled records as superseded and records the change audit; use this only when the uploaded file is the complete replacement timetable.
+   - **Cancel import** leaves the active timetable unchanged.
 4. Search with `/timetable anatomy` or `/timetable Hall 2`.
 5. Edit a record with `/timetablechange ID | location=Hall 3 | reason=official correction`. Supported fields: `course`, `session_type`, `session_date` (YYYY-MM-DD), `weekday`, `start_time` and `end_time` (HH:MM), `location`, `instructor`, `notes`, and `status` (`scheduled`, `cancelled`, `superseded`). Changes are recorded in `timetable_changes`.
 
