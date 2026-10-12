@@ -399,14 +399,14 @@ def update_timetable_entry(db: Any, entry_id: int, changes: dict[str, str], acto
 
 def save_announcement(db: Any, *, chat_id: int, message_id: int, source_date: str, source_link: str,
                       original_text: str, category: str, relevance: str, draft_summary: str, now: str) -> None:
-    initial_status = "pending_review" if relevance == "relevant" else "ignored"
+    initial_status = "pending_review" if relevance in {"relevant", "pending"} else "ignored"
     db.execute(
         """INSERT INTO announcements(source_chat_id,source_message_id,source_date,source_link,original_text,category,relevance,draft_summary,status,first_seen_at,updated_at)
            VALUES (?,?,?,?,?,?,?,?, ?, ?, ?)
            ON CONFLICT(source_chat_id,source_message_id) DO UPDATE SET
              source_date=excluded.source_date, source_link=excluded.source_link, original_text=excluded.original_text,
              category=excluded.category, relevance=excluded.relevance, draft_summary=excluded.draft_summary,
-             status=CASE WHEN excluded.relevance='relevant' THEN 'pending_review' ELSE 'ignored' END,
+             status=CASE WHEN excluded.relevance IN ('relevant','pending') THEN 'pending_review' ELSE 'ignored' END,
              updated_at=excluded.updated_at""",
         (chat_id, message_id, source_date, source_link, original_text[:20000], category[:100], relevance[:50], draft_summary[:5000], initial_status, now, now),
     )
