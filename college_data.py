@@ -329,7 +329,7 @@ def save_timetable_preview(db: Any, file_name: str, payload: bytes, uploader_id:
     return import_id, parsed
 
 
-def commit_timetable_import(db: Any, import_id: int, actor_id: int, now: str) -> int:
+def commit_timetable_import(db: Any, import_id: int, actor_id: int, now: str, replace_existing: bool = False) -> int:
     found = db.execute(
         "SELECT status, parsed_rows_json, file_name FROM timetable_imports WHERE id=?",
         (import_id,),
@@ -351,6 +351,24 @@ def commit_timetable_import(db: Any, import_id: int, actor_id: int, now: str) ->
              entry["weekday"], entry["start_time"], entry["end_time"], entry["location"], entry["instructor"],
              entry["notes"], file_name, json.dumps(entry["source_row"], ensure_ascii=False), now, now),
         )
+    if replace_existing:
+        old_rows = db.execute(
+            """SELECT id,course,session_type,session_date,weekday,start_time,end_time,location,instructor,notes,status
+               FROM timetable_entries WHERE status='scheduled' AND import_id<>?""",
+            (import_id,),
+        ).rows
+        fields = ["course","session_type","session_date","weekday","start_time","end_time","location","instructor","notes","status"]
+        for row in old_rows:
+            entry_id = int(row[0])
+            old_values = dict(zip(fields, row[1:]))
+            new_values = {**old_values, "status": "superseded"}
+            db.execute(
+                """INSERT INTO timetable_changes(entry_id,changed_by,changed_at,old_values_json,new_values_json,reason)
+                   VALUES (?,?,?,?,?,?)""",
+                (entry_id, actor_id, now, json.dumps(old_values, ensure_ascii=False),
+                 json.dumps(new_values, ensure_ascii=False), f"Replaced by timetable import #{import_id}"),
+            )
+            db.execute("UPDATE timetable_entries SET status='superseded', updated_at=? WHERE id=? AND status='scheduled'", (now, entry_id))
     db.execute(
         "UPDATE timetable_imports SET status='confirmed', confirmed_by=?, confirmed_at=? WHERE id=? AND status='pending'",
         (actor_id, now, import_id),
