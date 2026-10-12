@@ -842,10 +842,11 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
         if faq:
             faq_id, question, answer = faq
             try:
-                await message.reply_text(
+                sent_reply = await message.reply_text(
                     f"إجابة من الأسئلة الشائعة (FAQ #{faq_id}):\n{answer}",
                     disable_web_page_preview=True,
                 )
+                await asyncio.to_thread(persist_assistant_message, message.chat_id, sent_reply.message_id, f"إجابة من الأسئلة الشائعة (FAQ #{faq_id}): {answer}")
                 await asyncio.to_thread(
                     lambda: _exec(
                         "UPDATE faqs SET last_used_at=? WHERE id=?",
@@ -883,6 +884,39 @@ async def timetable_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.effective_message.reply_text("لا توجد محاضرات مطابقة محفوظة. يمكن للقائد رفع ملف CSV أو XLSX في جروب القيادة لمعاينته قبل الاعتماد.")
         return
     await update.effective_message.reply_text(("الجدول المحفوظ (أول 20 نتيجة):\n" + "\n".join(_format_timetable_entry(row) for row in rows))[:3900])
+
+
+async def timetablechange_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_leader(update, context):
+        return
+    raw = " ".join(context.args).strip()
+    parts = [part.strip() for part in raw.split("|")]
+    if len(parts) < 2 or not parts[0].lstrip("#").isdigit():
+        await update.effective_message.reply_text(
+            "استخدم: /timetablechange ID | field=value | reason=سبب التغيير\n"
+            "الحقول: course, session_type, session_date, weekday, start_time, end_time, location, instructor, notes, status"
+        )
+        return
+    entry_id = int(parts[0].lstrip("#"))
+    changes = {}
+    reason = ""
+    for part in parts[1:]:
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        key, value = key.strip().lower(), value.strip()
+        if key == "reason":
+            reason = value
+        else:
+            changes[key] = value
+    try:
+        await asyncio.to_thread(update_timetable_entry, db, entry_id, changes, update.effective_user.id, reason, utc_now())
+        await update.effective_message.reply_text(
+            f"تم تحديث السجل #{entry_id} مع حفظ سجل تدقيق للتغيير. استخدم /timetable للبحث."
+        )
+    except Exception as exc:
+        log.warning("Timetable edit rejected: %s", exc)
+        await update.effective_message.reply_text(f"لم يتم تعديل الجدول: {str(exc)[:700]}")
 
 
 async def timetable_upload_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1097,6 +1131,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/reviewold — عرض الأسئلة الشائعة التي لم تُراجع منذ 90 يوماً\n"
         "/archivefaq رقم — أرشفة FAQ يدوياً\n"
         "/timetable [بحث] — البحث في الجدول المحفوظ\n"
+        "/timetablechange ID | field=value | reason=... — تعديل سجل مع حفظ سجل تدقيق\n"
         "/pendingannouncements — مسودات الإعلانات\n"
         "/approveannouncement ID | /editannouncement ID | نص | /rejectannouncement ID\n\n"
         "تلميح الأولوية يمكن كتابته في أي مكان: urgent / medium / low أو عاجل / متوسط / منخفض.\n"
@@ -1359,6 +1394,7 @@ def main() -> None:
     app.add_handler(CommandHandler("archivefaq", archivefaq_command))
     app.add_handler(CommandHandler("reviewold", reviewold_command))
     app.add_handler(CommandHandler("timetable", timetable_command))
+    app.add_handler(CommandHandler("timetablechange", timetablechange_command))
     app.add_handler(CommandHandler("pendingannouncements", pendingannouncements_command))
     app.add_handler(CommandHandler("approveannouncement", approveannouncement_command))
     app.add_handler(CommandHandler("editannouncement", editannouncement_command))
