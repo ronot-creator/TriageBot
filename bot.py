@@ -37,6 +37,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from collections import defaultdict, deque
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+QENA_TZ = ZoneInfo('Africa/Cairo')
 from typing import Literal, Optional
 
 from google import genai
@@ -872,8 +875,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     # Never ask Gemini to invent schedule facts or generate SQL.
     if schedule_question:
         timetable_answer = await asyncio.to_thread(
-            answer_timetable_question, db, raw_text,
-            get_config("current_term_start"), get_config("current_term_end")
+            answer_timetable_question, db, raw_text, get_config("current_term") or "term1"
         )
         if timetable_answer:
             try:
