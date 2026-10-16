@@ -1551,6 +1551,14 @@ Leader update: {raw}
     )
 
 
+async def date_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Display the bot's current local date and time for Qena, Egypt."""
+    now = datetime.now(QENA_TZ)
+    await update.effective_message.reply_text(
+        f"تاريخ قنا المحلي: {now:%Y-%m-%d}\nالوقت المحلي: {now:%H:%M:%S}"
+    )
+
+
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await require_leader(update, context):
         return
@@ -1804,6 +1812,7 @@ def main() -> None:
     app.add_handler(CommandHandler("setleaders", setleaders_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("setterm", setterm_command))
+    app.add_handler(CommandHandler("date", date_command))
     app.add_handler(CommandHandler("addinfo", addinfo_command))
     app.add_handler(CommandHandler("addword", addword_command))
     app.add_handler(CommandHandler("delword", delword_command))
