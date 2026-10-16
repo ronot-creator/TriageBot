@@ -1,6 +1,6 @@
 import unittest
 from datetime import date
-from timetable_qa import normalize_text, looks_like_schedule_question, resolve_intent, _groups_from_text
+from timetable_qa import normalize_text, looks_like_schedule_question, resolve_intent, _groups_from_text, answer_timetable_question
 ALIASES=[
  {"entity_type":"Subject","canonical_value":"Anatomy","alias":"Anatomy","notes":""},
  {"entity_type":"Subject","canonical_value":"Physiology","alias":"Physiology","notes":""},
@@ -26,4 +26,28 @@ class TimetableIntentTests(unittest.TestCase):
  def test_invalid_date(self):self.assertIsNone(resolve_intent("Anatomy 31/02/2027",ALIASES,date(2026,10,16))["date"])
  def test_arabic_room_alias(self):self.assertEqual(resolve_intent("Where is مدرج 8?",ALIASES,date(2026,10,16))["room"],"Hall 8")
  def test_tomorrow_is_resolved_by_code(self):self.assertEqual(resolve_intent("What do we have tomorrow?",ALIASES,date(2026,10,16))["date"],"2026-10-17")
-if __name__=="__main__":unittest.main()
+
+class FakeDB:
+ def execute(self,sql,args=()):
+  class Result:
+   def __init__(self,rows):self.rows=rows
+  if "FROM translation_aliases" in sql:return Result([])
+  if "SELECT activity_type,groups_text,event_date FROM timetable_events" in sql:
+   return Result([
+    ("Group Discussion","1, 2, 6","2026-10-01"),
+    ("GD","Group 6, Group 7","2026-10-03"),
+    ("Lecture","6","2026-10-04"),
+    ("Group Discussion","14","2026-10-05"),
+   ])
+  raise AssertionError("Unexpected query: "+sql)
+class TimetableCountTests(unittest.TestCase):
+ def test_group_six_count_is_deterministic(self):
+  answer=answer_timetable_question(FakeDB(),"How many group discussions does group six have?")
+  self.assertIn("عدد 2",answer)
+ def test_arabic_group_number_count(self):
+  answer=answer_timetable_question(FakeDB(),"عدد الـ GD للمجموعة ٦ كام؟")
+  self.assertIn("عدد 2",answer)
+ def test_missing_group_asks_for_clarification(self):
+  answer=answer_timetable_question(FakeDB(),"How many group discussions do we have?")
+  self.assertIn("أي مجموعة",answer)
+\nif __name__=="__main__":unittest.main()
