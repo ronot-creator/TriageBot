@@ -57,4 +57,30 @@ class CurrentTermTests(unittest.TestCase):
   intent=resolve_intent("When is the GD the day after tomorrow?",ALIASES,date(2026,10,16))
   self.assertEqual(intent["date"],"2026-10-18")
 
+class TBLStatusOverlayTests(unittest.TestCase):
+ def _db(self,changes):
+  class Result:
+   def __init__(self,rows):self.rows=rows
+  class DB:
+   def execute(self,sql,args=()):
+    if "FROM translation_aliases" in sql:return Result([])
+    if "FROM activity_changes" in sql:return Result(changes)
+    raise AssertionError("TBL query should short-circuit timetable fallback: "+sql)
+  return DB()
+ def test_missing_tbl_record_is_unknown_not_absent(self):
+  answer=answer_timetable_question(self._db([]),"Is there a TBL for group 6?")
+  self.assertIn("لا توجد لديّ معلومة مؤكدة",answer)
+  self.assertIn("وجود أو عدم وجود",answer)
+ def test_confirmed_tbl_uses_leader_record(self):
+  answer=answer_timetable_question(self._db([
+   ("TBL group 6","confirmed",None,None,"Confirmed by leaders","GD","2026-10-16")
+  ]),"Is there a TBL for group 6?")
+  self.assertIn("مؤكد",answer)
+  self.assertIn("Confirmed by leaders",answer)
+ def test_possible_tbl_stays_unconfirmed(self):
+  answer=answer_timetable_question(self._db([
+   ("TBL group 6","unknown",None,None,"Possible, not confirmed","GD","2026-10-16")
+  ]),"Is there a TBL for group 6?")
+  self.assertIn("غير مؤكد",answer)
+
 if __name__=="__main__":unittest.main()
