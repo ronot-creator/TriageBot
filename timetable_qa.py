@@ -164,7 +164,39 @@ def answer_timetable_question(db:Any,text:str,current_term:str="term1")->str|Non
                         if end and intent["date"] > str(end): continue
                     matching_changes.append(row)
             if not matching_changes:
-                return f"لا توجد لديّ معلومة مؤكدة عن وجود أو عدم وجود TBL للمجموعة {group} في البيانات الحالية. لم يتم تسجيل تحديث مؤكد من القيادة."
+                # The imported workbook is the baseline source of scheduled activities.
+                # Leadership changes override it, but absence of a change is not absence
+                # of a scheduled TBL.
+                base_sql = """SELECT activity_type,groups_text,event_date,day,source_text
+                              FROM timetable_events
+                              WHERE year_level=?"""
+                base_args: list[Any] = ["First year"]
+                if intent["date_start"] and intent["date_end"]:
+                    base_sql += " AND event_date>=? AND event_date<=?"
+                    base_args.extend((intent["date_start"], intent["date_end"]))
+                if intent["date"]:
+                    base_sql += " AND event_date=?"
+                    base_args.append(intent["date"])
+                base_sql += " ORDER BY event_date"
+                base_rows = db.execute(base_sql, tuple(base_args)).rows
+                scheduled = []
+                for base_row in base_rows:
+                    activity, groups_text, event_date, day, source_text = base_row
+                    activity_norm = normalize_text(activity)
+                    is_tbl_row = (
+                        re.search(r"(?<![a-z0-9])tbl(?![a-z0-9])", activity_norm) is not None
+                        or "team based learning" in activity_norm
+                        or "team-based learning" in activity_norm
+                    )
+                    if is_tbl_row and group in _groups_from_text(groups_text):
+                        scheduled.append(base_row)
+                if scheduled:
+                    lines = [f"حسب الجدول المستورد، يوجد TBL مدرج للمجموعة {group}."]
+                    for activity, groups_text, event_date, day, source_text in scheduled[:10]:
+                        lines.append(f"• {event_date or 'التاريخ غير محدد'} ({day or 'اليوم غير محدد'}) — {activity}")
+                    lines.append("لم أجد تحديثاً أحدث من القيادة يغيّر هذه البيانات.")
+                    return "\\n".join(lines)[:1800]
+                return f"لا توجد لديّ معلومة مؤكدة عن وجود أو عدم وجود TBL للمجموعة {group} في البيانات الحالية. لم يظهر نشاط مطابق في الجدول المستورد ولم يتم تسجيل تحديث من القيادة."
             latest = matching_changes[0]
             _, status, start, end, details, related, created = latest
             status = str(status or "unknown").lower()
