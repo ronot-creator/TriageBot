@@ -130,6 +130,59 @@ def answer_timetable_question(db:Any,text:str,current_term:str="term1")->str|Non
             else:
                 period="ضمن بيانات الفصل الأول الموجودة في ملف السنة الأولى المستورد"
             return f"حسب الجدول المستورد، للمجموعة {group} عدد {len(matching)} من جلسات Group Discussion (GD) {period}."
+        # TBL status is maintained by leaders; never infer it from a GD entry.
+        # Missing records are unknown, not proof that a TBL exists or does not exist.
+        asks_tbl = bool(re.search(r"(?<![a-z0-9])tbl(?![a-z0-9])", normalized)) or any(
+            term in normalized for term in ("team based learning", "team-based learning", "تعلم جماعي", "تي بي ال")
+        )
+        if asks_tbl:
+            group = intent["group"]
+            if group is None:
+                group_match = re.search(
+                    r"(?:group|grp|جروب|مجموعة)\s+(one|two|three|four|five|six|seven|eight|nine|ten|واحد|واحدة|اتنين|اثنين|تلاتة|ثلاثة|اربعة|خمسة|ستة|سبعة|تمانية|ثمانية|تسعة|عشرة)\b",
+                    normalized,
+                )
+                words = {"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,"eight":8,"nine":9,"ten":10,
+                         "واحد":1,"واحدة":1,"اتنين":2,"اثنين":2,"تلاتة":3,"ثلاثة":3,"اربعة":4,"خمسة":5,"ستة":6,"سبعة":7,"تمانية":8,"ثمانية":8,"تسعة":9,"عشرة":10}
+                if group_match:
+                    group = words.get(group_match.group(1))
+            if group is None:
+                return "أقدر أراجع حالة الـTBL، لكن أحتاج رقم المجموعة أولاً. تقصد أي مجموعة؟"
+            change_rows = db.execute(
+                """SELECT activity_key,status,effective_start,effective_end,details,related_activity,created_at
+                   FROM activity_changes
+                   WHERE active=1 AND upper(activity_type)='TBL'
+                   ORDER BY id DESC LIMIT 200"""
+            ).rows
+            matching_changes = []
+            for row in change_rows:
+                key, status, start, end, details, related, created = row
+                searchable = f"{key or ''} {details or ''} {related or ''}"
+                if group in _groups_from_text(searchable):
+                    if intent["date"]:
+                        if start and intent["date"] < str(start): continue
+                        if end and intent["date"] > str(end): continue
+                    matching_changes.append(row)
+            if not matching_changes:
+                return f"لا توجد لديّ معلومة مؤكدة عن وجود أو عدم وجود TBL للمجموعة {group} في البيانات الحالية. لم يتم تسجيل تحديث مؤكد من القيادة."
+            latest = matching_changes[0]
+            _, status, start, end, details, related, created = latest
+            status = str(status or "unknown").lower()
+            if status in {"confirmed", "added"}:
+                label = "مؤكد"
+            elif status in {"cancelled", "removed"}:
+                label = "غير موجود/ملغي حسب آخر تحديث مسجل"
+            elif status == "rescheduled":
+                label = "تم تغيير موعده حسب آخر تحديث مسجل"
+            else:
+                label = "غير مؤكد حتى الآن"
+            lines = [f"حالة TBL للمجموعة {group}: {label}."]
+            if start or end:
+                lines.append("الفترة المسجلة: " + str(start or "بداية غير محددة") + " إلى " + str(end or "نهاية غير محددة") + ".")
+            if details:
+                lines.append("التفاصيل: " + str(details))
+            lines.append("المصدر: تحديث محفوظ من القيادة؛ راجع القيادة إذا كنت تحتاج تأكيداً إضافياً.")
+            return "\n".join(lines)[:1800]
         if intent["exam"]:
             sql="SELECT event_date,day,assessment_type,subject,activity_component,source_text,review_note FROM exam_events WHERE year_level=?"
             args:list[Any]=["First year"]
