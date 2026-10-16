@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from typing import Any
 
 CAIRO=ZoneInfo("Africa/Cairo")
-SCHEDULE_TERMS=("timetable","schedule","lecture","practical","section","gd","tbl","pg","group","room","hall","when is","what do we have","next","جدول","محاضرة","محاضرات","عملي","سكشن","سيكشن","جروب","مجموعة","قاعة","مدرج","امتحان","امتحانات","ميدترم","فاينل","امتى","متى","انهارده","بكره","بكرة")
+SCHEDULE_TERMS=("timetable","schedule","lecture","practical","section","gd","tbl","pg","group","room","hall","when is","what do we have","what is on","جدول","محاضرة","محاضرات","عملي","سكشن","سيكشن","جروب","مجموعة","قاعة","مدرج","امتحان","امتحانات","ميدترم","فاينل","امتى","متى","النهارده","انهارده")
 EXAM_TERMS=("exam","exams","midterm","mid term","final","امتحان","امتحانات","ميدترم","فاينل")
 ACTIVITY_CANONICAL={"lecture","practical","gd","tbl","pg"}
 
@@ -18,7 +18,14 @@ def normalize_text(value: Any)->str:
 
 def looks_like_schedule_question(text:str)->bool:
     n=normalize_text(text)
-    return any(normalize_text(term) in n for term in SCHEDULE_TERMS)
+    for term in SCHEDULE_TERMS:
+        candidate=normalize_text(term)
+        if re.search(r"[a-z0-9]",candidate):
+            if re.search(r"(?<![a-z0-9])"+re.escape(candidate)+r"(?![a-z0-9])",n):
+                return True
+        elif candidate in n:
+            return True
+    return False
 
 def _contains_alias(text:str,alias:str)->bool:
     alias=normalize_text(alias)
@@ -33,12 +40,19 @@ def load_aliases(db:Any)->list[dict[str,str]]:
 
 def resolve_intent(text:str,aliases:list[dict[str,str]],today:date|None=None)->dict[str,Any]:
     n=normalize_text(text)
-    intent={"exam":any(normalize_text(t) in n for t in EXAM_TERMS),"subject":None,"activity":None,"non_lecture":False,"group":None,"date":None,"weekday":None,"next":False}
+    intent={"exam":any(normalize_text(t) in n for t in EXAM_TERMS),"subject":None,"activity":None,"non_lecture":False,"room":None,"group":None,"date":None,"weekday":None,"next":False}
+    today=today or datetime.now(CAIRO).date()
+    if any(t in n for t in ("today","النهارده","انهارده")):
+        intent["date"]=today.isoformat()
+    elif any(t in n for t in ("tomorrow","بكره","بكرة")):
+        from datetime import timedelta
+        intent["date"]=(today+timedelta(days=1)).isoformat()
     intent["next"]=any(t in n for t in ("next","upcoming","الجاية","القادم","القادمة"))
     for item in sorted(aliases,key=lambda a:len(normalize_text(a["alias"])),reverse=True):
         if not _contains_alias(n,item["alias"]):continue
         kind=normalize_text(item["entity_type"]); canon=item["canonical_value"].strip(); cn=normalize_text(canon)
         if kind=="subject" and not intent["subject"]:intent["subject"]=canon
+        elif kind=="room" and not intent["room"]:intent["room"]=canon
         elif kind=="activity type" and not intent["activity"]:
             if cn=="other / source label" or normalize_text(item["alias"])=="section":intent["non_lecture"]=True
             elif cn in ACTIVITY_CANONICAL:intent["activity"]=canon
@@ -86,6 +100,7 @@ def answer_timetable_question(db:Any,text:str)->str|None:
         if intent["date"]:sql+=" AND event_date=?";args.append(intent["date"])
         if intent["weekday"]:sql+=" AND day=?";args.append(intent["weekday"])
         if intent["subject"]:sql+=" AND lower(subject)=lower(?)";args.append(intent["subject"])
+        if intent["room"]:sql+=" AND lower(room_text) LIKE lower(?)";args.append("%"+intent["room"]+"%")
         if intent["activity"]:sql+=" AND lower(activity_type)=lower(?)";args.append(intent["activity"])
         elif intent["non_lecture"]:sql+=" AND lower(activity_type)<>lower(?)";args.append("Lecture")
         if intent["next"]:sql+=" AND event_date>=?";args.append(datetime.now(CAIRO).date().isoformat())
