@@ -37,6 +37,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from collections import defaultdict, deque
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+QENA_TZ = ZoneInfo('Africa/Cairo')
 from typing import Literal, Optional
 
 from google import genai
@@ -65,6 +68,7 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    ApplicationHandlerStop,
     filters,
 )
 
@@ -75,6 +79,11 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 log = logging.getLogger("svu-triage")
+
+# HTTP clients can log full request URLs; Telegram Bot API URLs contain the bot token.
+# Keep transport logs at WARNING so credentials are not emitted by routine request logging.
+for _logger_name in ("httpx", "httpcore", "httpcore2", "telegram.request"):
+    logging.getLogger(_logger_name).setLevel(logging.WARNING)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
@@ -162,6 +171,19 @@ DEFAULT_KEYWORDS = [
 
 # ----------------------------- Data model --------------------------------
 
+class ActivityUpdateProposal(BaseModel):
+    activity_key: str = Field(description="Short stable key, such as GD group 6 or TBL group 6.")
+    activity_type: Literal["GD", "TBL", "lecture", "practical", "PG", "other"]
+    status: Literal["confirmed", "cancelled", "unknown", "rescheduled", "added", "removed"]
+    effective_start: Optional[str] = Field(default=None, description="ISO date YYYY-MM-DD if explicitly supported.")
+    effective_end: Optional[str] = Field(default=None, description="ISO date YYYY-MM-DD if explicitly supported.")
+    details: str = Field(default="", description="Short factual description; do not invent missing facts.")
+    related_activity: str = Field(default="", description="Related activity, e.g. GD if this update concerns TBL with GD.")
+    clarification_needed: bool = Field(default=False)
+    clarification_question: str = Field(default="")
+    confidence: float = Field(ge=0, le=1)
+
+
 class TriageResult(BaseModel):
     urgency: Literal["URGENT", "MEDIUM", "LOW", "UNIMPORTANT"]
     action: Literal["LEADER_REVIEW", "FAQ_REPLY", "ANNOUNCEMENT_REPLY", "NO_ACTION"]
@@ -235,12 +257,53 @@ def init_db() -> None:
             requests INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (usage_date, model_name)
         )""",
+        """CREATE TABLE IF NOT EXISTS model_request_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usage_date TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model_name TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            duration_ms INTEGER,
+            error_category TEXT NOT NULL DEFAULT '',
+            session_key TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_model_request_log_date_provider ON model_request_log(usage_date, provider, model_name)",
         """CREATE TABLE IF NOT EXISTS processed_messages (
             chat_id INTEGER NOT NULL,
             message_id INTEGER NOT NULL,
             processed_at TEXT NOT NULL,
             PRIMARY KEY(chat_id, message_id)
         )""",
+        """CREATE TABLE IF NOT EXISTS activity_changes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            activity_key TEXT NOT NULL,
+            activity_type TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'unknown',
+            effective_start TEXT,
+            effective_end TEXT,
+            details TEXT NOT NULL DEFAULT '',
+            related_activity TEXT NOT NULL DEFAULT '',
+            source_chat_id INTEGER,
+            source_message_id INTEGER,
+            created_by INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_by INTEGER NOT NULL,
+            updated_at TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_activity_changes_key_active ON activity_changes(activity_key, active)",
+        """CREATE TABLE IF NOT EXISTS pending_clarifications (
+            user_id INTEGER NOT NULL,
+            chat_id INTEGER NOT NULL,
+            original_text TEXT NOT NULL,
+            proposal_json TEXT NOT NULL,
+            question TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(user_id, chat_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_pending_clarifications_chat ON pending_clarifications(chat_id, updated_at)",
     ]
     for statement in statements:
         _exec(statement)
@@ -282,6 +345,10 @@ def get_active_keywords() -> list[str]:
     return [str(row[0]) for row in result.rows]
 
 def is_blacklisted(user_id: int) -> bool:
+    # The configured owner is a protected principal and can never be suppressed by
+    # a stale or malicious blacklist row.
+    if OWNER_ID is not None and user_id == OWNER_ID:
+        return False
     return bool(_exec("SELECT 1 FROM blacklist WHERE user_id = ?", (user_id,)).rows)
 
 def add_ticket(
@@ -358,7 +425,7 @@ def reserve_daily_request(model_name: str = MODEL_NAME) -> bool:
     if model_name not in APPROVED_MODELS:
         log.error("Refusing unapproved Gemini model: %s", model_name)
         return False
-    day = datetime.now(timezone.utc).date().isoformat()
+    day = datetime.now(QENA_TZ).date().isoformat()
     _exec("INSERT OR IGNORE INTO model_usage(usage_date,model_name,requests) VALUES (?,?,0)", (day, model_name))
     result = _exec(
         "UPDATE model_usage SET requests=requests+1 WHERE usage_date=? AND model_name=? AND requests < ?",
@@ -369,6 +436,18 @@ def reserve_daily_request(model_name: str = MODEL_NAME) -> bool:
     _exec("INSERT OR IGNORE INTO api_usage(usage_date,requests) VALUES (?,0)", (day,))
     _exec("UPDATE api_usage SET requests=requests+1 WHERE usage_date=?", (day,))
     return True
+
+
+def log_model_request(provider: str, model_name: str, outcome: str, duration_ms: int | None = None,
+                      error_category: str = "", session_key: str = "") -> None:
+    """Record provider/model attempts without storing prompts, secrets, or raw error text."""
+    _exec(
+        """INSERT INTO model_request_log
+           (usage_date,provider,model_name,outcome,duration_ms,error_category,session_key,created_at)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (datetime.now(QENA_TZ).date().isoformat(), provider, model_name, outcome,
+         duration_ms, error_category[:80], session_key[:160], utc_now()),
+    )
 
 
 def claim_message_for_processing(chat_id: int, message_id: int) -> bool:
@@ -684,6 +763,7 @@ async def call_gemini(
     if FALLBACK_MODEL and FALLBACK_MODEL != MODEL_NAME:
         models_to_try.append(FALLBACK_MODEL)
     for model_index, model_name in enumerate(models_to_try):
+        attempt_started = time.monotonic()
         try:
             if model_name not in APPROVED_MODELS:
                 log.error("Refusing unapproved Gemini model: %s", model_name)
@@ -691,6 +771,8 @@ async def call_gemini(
             await wait_for_rpm_slot(model_name)
             allowed = await asyncio.to_thread(reserve_daily_request, model_name)
             if not allowed:
+                await asyncio.to_thread(log_model_request, "google", model_name, "skipped_quota",
+                    int((time.monotonic() - attempt_started) * 1000), "daily_cap", str(message.chat_id))
                 log.warning("Daily request cap reached for %s; considering approved fallback.", model_name)
                 continue
             response = await gemini_async.models.generate_content(
@@ -704,15 +786,25 @@ async def call_gemini(
             )
             parsed = getattr(response, "parsed", None)
             if isinstance(parsed, TriageResult):
+                await asyncio.to_thread(log_model_request, "google", model_name, "success",
+                    int((time.monotonic() - attempt_started) * 1000), "", str(message.chat_id))
                 return parsed
             raw = getattr(response, "text", None)
             if raw:
-                return TriageResult.model_validate_json(raw)
+                parsed_result = TriageResult.model_validate_json(raw)
+                await asyncio.to_thread(log_model_request, "google", model_name, "success",
+                    int((time.monotonic() - attempt_started) * 1000), "", str(message.chat_id))
+                return parsed_result
+            await asyncio.to_thread(log_model_request, "google", model_name, "empty_response",
+                int((time.monotonic() - attempt_started) * 1000), "empty_response", str(message.chat_id))
             log.error("Gemini returned no parsable content from model %s.", model_name)
             return None
         except Exception as exc:
             error_text = str(exc).lower()
             retryable = any(token in error_text for token in ("429", "resource_exhausted", "quota", "rate limit", "too many requests"))
+            error_category = "quota_or_rate_limit" if retryable else type(exc).__name__
+            await asyncio.to_thread(log_model_request, "google", model_name, "error",
+                int((time.monotonic() - attempt_started) * 1000), error_category, str(message.chat_id))
             if model_index + 1 < len(models_to_try) and retryable:
                 log.warning("Primary model %s hit a quota/rate limit; trying configured fallback %s.", model_name, models_to_try[model_index + 1])
                 continue
@@ -848,7 +940,9 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     # Timetable facts are retrieved deterministically from Turso before triage.
     # Never ask Gemini to invent schedule facts or generate SQL.
     if schedule_question:
-        timetable_answer = await asyncio.to_thread(answer_timetable_question, db, raw_text)
+        timetable_answer = await asyncio.to_thread(
+            answer_timetable_question, db, raw_text, get_config("current_term") or "term1"
+        )
         if timetable_answer:
             try:
                 sent_reply = await message.reply_text(timetable_answer, disable_web_page_preview=True)
@@ -857,7 +951,12 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 )
             except TelegramError:
                 log.exception("Could not send timetable answer.")
-            return
+            # Ordinary timetable questions should receive a direct answer without
+            # becoming tickets. If the same message also explicitly triggered triage
+            # (mention, reply to the bot, or a configured keyword), continue through
+            # the original triage path so timetable handling cannot swallow a report.
+            if not (mentioned or replied_to_bot or keyword):
+                return
 
     hint, cleaned = urgency_hint_and_clean_text(raw_text)
     # Keep original text intact in the prompt and ticket. Cleaned text is only a readable supplement.
@@ -1246,27 +1345,67 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    owner_label = f"@{OWNER_USERNAME}" if OWNER_USERNAME else "مسؤول البوت"
-    await update.effective_message.reply_text(
-        "📚 مساعدة SVU Med Triage Bot\n\n"
-        "ما الذي أستطيع فعله؟\n"
-        "• أساعد في الأسئلة الشائعة المعتمدة.\n"
-        "• أجيب عن أسئلة جدول وامتحانات السنة الأولى عندما تكون المعلومة موجودة في البيانات المحفوظة.\n"
-        "• أراجع الرسائل الجامعية التي تحتاج متابعة، وقد أحيلها إلى المسؤولين للمراجعة.\n"
-        "• أتعامل مع الإعلانات المحفوظة عند توفر مصدر مناسب.\n\n"
-        "كيف تستخدم البوت؟\n"
-        "• اكتب سؤالك بوضوح، واذكر المجموعة أو التاريخ أو المادة عند السؤال عن الجدول.\n"
-        "• استخدم /timetable متبوعاً بكلمات البحث للبحث في السجلات المتاحة.\n"
-        "• إذا لم أجد معلومة مؤكدة، فقد أطلب مراجعة بشرية بدلاً من التخمين.\n"
-        "• البوت ليس بديلاً عن الطبيب أو عن إعلان رسمي؛ تأكد من المواعيد المهمة من المصدر الرسمي.\n\n"
-        "الأوامر المتاحة للطلاب:\n"
-        "/start — بدء الاستخدام\n"
-        "/help — عرض هذه المساعدة\n"
-        "/morehelp — إرسال استفسار خاص إلى " + owner_label + "\n\n"
-        "لإرسال استفسار خاص، افتح المحادثة الخاصة مع البوت ثم أرسل /morehelp واتبع التعليمات. "
-        "رسالتك ستصل إلى مسؤول البوت للمراجعة، لكن الرد ليس فورياً أو مضموناً."
-    )
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
 
+    is_owner = user.id == OWNER_ID
+    is_authorized_leader = is_owner or await is_leader(update, context)
+    owner_label = f"@{OWNER_USERNAME}" if OWNER_USERNAME else "مسؤول البوت"
+
+    sections = [
+        "📚 مساعدة SVU Med Triage Bot",
+        "",
+        "للطلبة والجميع:",
+        "/start — بدء الاستخدام",
+        "/help — عرض المساعدة المناسبة لصلاحياتك",
+        "/morehelp — إرسال استفسار خاص لمسؤول البوت",
+        "",
+        "اكتب سؤالك بوضوح. لأسئلة الجدول، اذكر المجموعة أو التاريخ أو المادة إن أمكن.",
+        "إذا لم تتوفر معلومة موثوقة، سأوضح ذلك بدلاً من التخمين. تأكد من المواعيد المهمة من المصدر الرسمي.",
+    ]
+
+    if is_authorized_leader:
+        sections.extend([
+            "",
+            "🛡️ أوامر القيادة:",
+            "/status — حالة البوت والاستخدام",
+            "/setterm term1 — تحديد الفصل المتاح (بيانات الفصل الأول فقط)",
+            "/date — التاريخ المحلي الحالي",
+            "/addinfo — تسجيل تحديث لنشاط أو جدول",
+            "/addword — إضافة كلمة مفتاحية",
+            "/delword — تعطيل كلمة مفتاحية",
+            "/listwords — عرض الكلمات المفتاحية",
+            "/addfaq سؤال | إجابة | كلمات اختيارية — إضافة سؤال شائع",
+            "/listfaqs — عرض الأسئلة الشائعة",
+            "/delfaq رقم — تعطيل سؤال شائع",
+            "/archivefaq رقم — أرشفة سؤال شائع",
+            "/reviewold — عرض الأسئلة التي تحتاج مراجعة",
+            "/timetable — البحث في بيانات الجدول",
+            "/timetablechange — إدارة تحديثات الجدول",
+            "/pendingannouncements — عرض الإعلانات المعلقة",
+            "/approveannouncement رقم — اعتماد إعلان",
+            "/editannouncement رقم | النص — تعديل إعلان",
+            "/rejectannouncement رقم — رفض إعلان",
+        ])
+
+    if is_owner:
+        sections.extend([
+            "",
+            "👑 أوامر المالك:",
+            "/chatid — عرض معرّف المحادثة لأغراض الإعداد",
+            "/setleaders — تعيين مجموعة القيادة (من المجموعة المقصودة)",
+            "",
+            "صلاحيات المالك تشمل أوامر الطلاب والقيادة والمالك. لا يمكن لأحد آخر تغيير هوية المالك.",
+        ])
+
+    sections.extend([
+        "",
+        f"للدعم الخاص: افتح محادثة البوت الخاصة ثم استخدم /morehelp. المسؤول: {owner_label}.",
+        "الرد على الاستفسارات الخاصة قد لا يكون فورياً.",
+    ])
+    await message.reply_text("\n".join(sections))
 
 async def morehelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
@@ -1355,14 +1494,208 @@ async def setleaders_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "للتأكد من صلاحيات الأعضاء، أضف البوت للجروب واجعله مشرفاً بصلاحيات محدودة."
     )
 
+async def setterm_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Set active term label; dates are derived automatically from Qena local time."""
+    message = update.effective_message
+    if not update.effective_user or update.effective_user.id != OWNER_ID:
+        await message.reply_text("الأمر ده متاح لمالك البوت فقط.")
+        return
+    if len(context.args) != 1:
+        await message.reply_text("استخدم: /setterm term1\nحالياً قاعدة البيانات تحتوي على بيانات الفصل الأول فقط.")
+        return
+    term = context.args[0].strip().lower().replace("-", "").replace("_", "")
+    if term not in {"term1", "1", "first", "firstterm", "الفصلالأول", "الترمالاول"}:
+        await message.reply_text("المتاح حالياً هو term1 فقط، لأن البيانات المستوردة تخص الفصل الأول. لن أفعّل فصلاً آخر قبل استيراد بياناته.")
+        return
+    set_config("current_term", "term1")
+    local_today = datetime.now(QENA_TZ).date().isoformat()
+    await message.reply_text(f"تم ضبط الفصل الحالي على term1. تاريخ اليوم في قنا: {local_today}. التاريخ يتحدد تلقائياً؛ لا تحتاج لإدخاله يدوياً.")
+
+
+async def addinfo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Parse and persist authorized activity updates using the approved Gemini models."""
+    message = update.effective_message
+    if not await require_leader(update, context):
+        return
+    raw = " ".join(context.args).strip()
+    if not raw:
+        await message.reply_text("استخدم: /addinfo ثم اكتب التحديث بلغة طبيعية.")
+        return
+    today = datetime.now(QENA_TZ).date().isoformat()
+    prompt = f"""
+Convert this authorized leader update into the requested structured activity record.
+Current local date in Qena, Egypt: {today}. The available academic dataset is term1 only.
+Interpret Arabic, English, or mixed language. Do not invent facts.
+If a TBL is only possible/not confirmed, status must be unknown, never confirmed.
+If essential details are ambiguous, set clarification_needed=true and ask one short question.
+Leader update: {raw}
+"""
+    models_to_try = [MODEL_NAME]
+    if FALLBACK_MODEL and FALLBACK_MODEL != MODEL_NAME:
+        models_to_try.append(FALLBACK_MODEL)
+    proposal = None
+    for model_index, model_name in enumerate(models_to_try):
+        started = time.monotonic()
+        try:
+            if model_name not in APPROVED_MODELS:
+                continue
+            await wait_for_rpm_slot(model_name)
+            if not await asyncio.to_thread(reserve_daily_request, model_name):
+                await asyncio.to_thread(log_model_request, "google", model_name, "skipped_quota",
+                    int((time.monotonic() - started) * 1000), "daily_cap", str(message.chat_id))
+                continue
+            response = await gemini_async.models.generate_content(
+                model=model_name,
+                contents=[prompt],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=ActivityUpdateProposal,
+                    temperature=0.1,
+                ),
+            )
+            parsed = getattr(response, "parsed", None)
+            if isinstance(parsed, ActivityUpdateProposal):
+                proposal = parsed
+            elif getattr(response, "text", None):
+                proposal = ActivityUpdateProposal.model_validate_json(response.text)
+            if proposal:
+                await asyncio.to_thread(log_model_request, "google", model_name, "success",
+                    int((time.monotonic() - started) * 1000), "", str(message.chat_id))
+                break
+            await asyncio.to_thread(log_model_request, "google", model_name, "empty_response",
+                int((time.monotonic() - started) * 1000), "empty_response", str(message.chat_id))
+        except Exception as exc:
+            err = str(exc).lower()
+            retryable = any(x in err for x in ("429", "resource_exhausted", "quota", "rate limit", "too many requests"))
+            await asyncio.to_thread(log_model_request, "google", model_name, "error",
+                int((time.monotonic() - started) * 1000),
+                "quota_or_rate_limit" if retryable else type(exc).__name__, str(message.chat_id))
+            if not (retryable and model_index + 1 < len(models_to_try)):
+                log.exception("Could not parse authorized activity update.")
+                break
+    if not proposal:
+        await message.reply_text("لم أستطع تحليل التحديث بأمان. لم يتم حفظ أي تغيير.")
+        return
+    if proposal.clarification_needed or proposal.confidence < 0.75:
+        question = proposal.clarification_question.strip() or "محتاج توضيح: ما النشاط أو المجموعة أو التاريخ المقصود؟"
+        try:
+            await asyncio.to_thread(
+                _exec,
+                """INSERT INTO pending_clarifications
+                   (user_id,chat_id,original_text,proposal_json,question,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?)
+                   ON CONFLICT(user_id,chat_id) DO UPDATE SET
+                     original_text=excluded.original_text,
+                     proposal_json=excluded.proposal_json,
+                     question=excluded.question,
+                     updated_at=excluded.updated_at""",
+                (update.effective_user.id, message.chat_id, raw[:4000],
+                 proposal.model_dump_json(), question[:1000], utc_now(), utc_now()),
+            )
+        except Exception:
+            log.exception("Could not persist pending activity clarification.")
+            await message.reply_text("التحديث غير واضح، وتعذر حفظ سؤال التوضيح في قاعدة البيانات. لم يتم حفظ أي تغيير.")
+            return
+        await message.reply_text(f"لم أحفظ أي تغيير بعد. {question}\nرد على السؤال هنا، وسأربط إجابتك بالتحديث المعلّق.")
+        return
+    for value in (proposal.effective_start, proposal.effective_end):
+        if value:
+            try:
+                date.fromisoformat(value)
+            except ValueError:
+                await message.reply_text("التاريخ غير واضح؛ لم يتم حفظ التغيير. استخدم تاريخاً واضحاً.")
+                return
+    stamp = utc_now()
+    try:
+        await asyncio.to_thread(
+            _exec,
+            """INSERT INTO activity_changes
+               (activity_key,activity_type,status,effective_start,effective_end,details,related_activity,
+                source_chat_id,source_message_id,created_by,created_at,updated_by,updated_at,active)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
+            (proposal.activity_key[:160], proposal.activity_type, proposal.status,
+             proposal.effective_start, proposal.effective_end, proposal.details[:2000],
+             proposal.related_activity[:160], message.chat_id, message.message_id,
+             update.effective_user.id, stamp, update.effective_user.id, stamp),
+        )
+    except Exception:
+        log.exception("Could not persist activity change.")
+        await message.reply_text("تعذر حفظ التحديث في قاعدة البيانات.")
+        return
+    await message.reply_text(
+        f"تم حفظ تحديث النشاط في Turso.\nالنشاط: {proposal.activity_key}\n"
+        f"النوع: {proposal.activity_type}\nالحالة: {proposal.status}\n"
+        f"التفاصيل: {proposal.details or 'لا توجد تفاصيل إضافية'}\n"
+        "تنبيه: التسجيل محفوظ؛ تطبيقه على إجابات الجدول يحتاج خطوة قراءة/أولوية منفصلة."
+    )
+
+
+async def leader_clarification_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Resume a leader's pending /addinfo clarification, persisted across restarts."""
+    message = update.effective_message
+    user = update.effective_user
+    chat = update.effective_chat
+    if (
+        not message or not user or not chat
+        or chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}
+        or message.text is None
+        or message.text.startswith("/")
+        or chat.id != get_leader_chat_id()
+        or not await is_leader(update, context)
+    ):
+        return
+    try:
+        rows = await asyncio.to_thread(
+            lambda: _exec(
+                "SELECT original_text,question FROM pending_clarifications WHERE user_id=? AND chat_id=?",
+                (user.id, chat.id),
+            ).rows
+        )
+    except Exception:
+        log.exception("Could not load pending leader clarification.")
+        return
+    if not rows:
+        return
+    original_text, previous_question = str(rows[0][0]), str(rows[0][1])
+    answer = message.text.strip()
+    if not answer:
+        return
+    try:
+        await asyncio.to_thread(
+            _exec,
+            "DELETE FROM pending_clarifications WHERE user_id=? AND chat_id=?",
+            (user.id, chat.id),
+        )
+    except Exception:
+        log.exception("Could not consume pending leader clarification.")
+        await message.reply_text("تعذر تحديث حالة سؤال التوضيح؛ لم أتابع لتجنب تكرار التحديث.")
+        raise ApplicationHandlerStop
+    context.args = [f"{original_text}\nPrevious clarification question: {previous_question}\nLeader clarification: {answer}"]
+    await addinfo_command(update, context)
+    raise ApplicationHandlerStop
+
+
+async def date_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Display the bot's current local date and time for Qena, Egypt."""
+    now = datetime.now(QENA_TZ)
+    await update.effective_message.reply_text(
+        f"تاريخ قنا المحلي: {now:%Y-%m-%d}\nالوقت المحلي: {now:%H:%M:%S}"
+    )
+
+
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await require_leader(update, context):
         return
     leader_id = get_leader_chat_id()
-    day = datetime.now(timezone.utc).date().isoformat()
+    day = datetime.now(QENA_TZ).date().isoformat()
     try:
         usage_rows = _exec("SELECT model_name,requests FROM model_usage WHERE usage_date=?", (day,)).rows
         usage = {str(row[0]): int(row[1]) for row in usage_rows}
+        attempt_rows = _exec(
+            "SELECT provider,model_name,outcome,COUNT(*) FROM model_request_log WHERE usage_date=? GROUP BY provider,model_name,outcome ORDER BY provider,model_name,outcome",
+            (day,),
+        ).rows
+        attempt_summary = "; ".join(f"{row[0]}/{row[1]} {row[2]}={row[3]}" for row in attempt_rows) or "لا توجد محاولات مسجلة اليوم"
         keyword_count = len(get_active_keywords())
         faq_count = len(get_faqs())
         await update.effective_message.reply_text(
@@ -1371,6 +1704,8 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"النموذج الأساسي: {MODEL_NAME}\n"
             f"استخدام اليوم: 3.5 Flash-Lite {usage.get('gemini-3.5-flash-lite', 0)}/{RPD_LIMIT}; 3.1 Flash-Lite {usage.get('gemini-3.1-flash-lite', 0)}/{RPD_LIMIT}\n"
             f"حد الدقيقة لكل نموذج: {RPM_LIMIT} طلب/دقيقة\n"
+            f"نتائج المحاولات: {attempt_summary}\n"
+            f"التاريخ المحلي (قنا): {day}\n"
             f"الكلمات النشطة: {keyword_count}\n"
             f"الأسئلة الشائعة النشطة: {faq_count}\n"
             f"الرد التلقائي من FAQ: {'مفعّل' if AUTO_FAQ_REPLY else 'متوقف'}"
@@ -1491,6 +1826,13 @@ async def blacklist_ticket_callback(
         await update.callback_query.answer("لم أجد صاحب البلاغ.", show_alert=True)
         return
     user_id = int(row[3])
+    if OWNER_ID is not None and user_id == OWNER_ID:
+        await update.callback_query.answer(
+            "لا يمكن لأي قائد إضافة مالك البوت إلى القائمة السوداء؛ صلاحيات المالك محمية.",
+            show_alert=True,
+        )
+        log.warning("Blocked blacklist attempt against bot owner by actor_id=%s ticket_id=%s", actor_id, ticket_id)
+        return
     _exec(
         "INSERT INTO blacklist(user_id, reason, added_by, created_at) VALUES (?, ?, ?, ?) "
         "ON CONFLICT(user_id) DO UPDATE SET reason=excluded.reason, added_by=excluded.added_by, created_at=excluded.created_at",
@@ -1597,9 +1939,16 @@ def main() -> None:
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("morehelp", morehelp_command))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, morehelp_message_handler), group=-1)
+    app.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,
+        leader_clarification_handler,
+    ), group=-2)
     app.add_handler(CommandHandler("chatid", chatid_command))
     app.add_handler(CommandHandler("setleaders", setleaders_command))
     app.add_handler(CommandHandler("status", status_command))
+    app.add_handler(CommandHandler("setterm", setterm_command))
+    app.add_handler(CommandHandler("date", date_command))
+    app.add_handler(CommandHandler("addinfo", addinfo_command))
     app.add_handler(CommandHandler("addword", addword_command))
     app.add_handler(CommandHandler("delword", delword_command))
     app.add_handler(CommandHandler("listwords", listwords_command))
