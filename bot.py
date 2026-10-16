@@ -170,6 +170,19 @@ DEFAULT_KEYWORDS = [
 
 # ----------------------------- Data model --------------------------------
 
+class ActivityUpdateProposal(BaseModel):
+    activity_key: str = Field(description="Short stable key, such as GD group 6 or TBL group 6.")
+    activity_type: Literal["GD", "TBL", "lecture", "practical", "PG", "other"]
+    status: Literal["confirmed", "cancelled", "unknown", "rescheduled", "added", "removed"]
+    effective_start: Optional[str] = Field(default=None, description="ISO date YYYY-MM-DD if explicitly supported.")
+    effective_end: Optional[str] = Field(default=None, description="ISO date YYYY-MM-DD if explicitly supported.")
+    details: str = Field(default="", description="Short factual description; do not invent missing facts.")
+    related_activity: str = Field(default="", description="Related activity, e.g. GD if this update concerns TBL with GD.")
+    clarification_needed: bool = Field(default=False)
+    clarification_question: str = Field(default="")
+    confidence: float = Field(ge=0, le=1)
+
+
 class TriageResult(BaseModel):
     urgency: Literal["URGENT", "MEDIUM", "LOW", "UNIMPORTANT"]
     action: Literal["LEADER_REVIEW", "FAQ_REPLY", "ANNOUNCEMENT_REPLY", "NO_ACTION"]
@@ -1438,6 +1451,106 @@ async def setterm_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await message.reply_text(f"تم ضبط الفصل الحالي على term1. تاريخ اليوم في قنا: {local_today}. التاريخ يتحدد تلقائياً؛ لا تحتاج لإدخاله يدوياً.")
 
 
+async def addinfo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Parse and persist authorized activity updates using the approved Gemini models."""
+    message = update.effective_message
+    if not await require_leader(update, context):
+        return
+    raw = " ".join(context.args).strip()
+    if not raw:
+        await message.reply_text("استخدم: /addinfo ثم اكتب التحديث بلغة طبيعية.")
+        return
+    today = datetime.now(QENA_TZ).date().isoformat()
+    prompt = f"""
+Convert this authorized leader update into the requested structured activity record.
+Current local date in Qena, Egypt: {today}. The available academic dataset is term1 only.
+Interpret Arabic, English, or mixed language. Do not invent facts.
+If a TBL is only possible/not confirmed, status must be unknown, never confirmed.
+If essential details are ambiguous, set clarification_needed=true and ask one short question.
+Leader update: {raw}
+"""
+    models_to_try = [MODEL_NAME]
+    if FALLBACK_MODEL and FALLBACK_MODEL != MODEL_NAME:
+        models_to_try.append(FALLBACK_MODEL)
+    proposal = None
+    for model_index, model_name in enumerate(models_to_try):
+        started = time.monotonic()
+        try:
+            if model_name not in APPROVED_MODELS:
+                continue
+            await wait_for_rpm_slot(model_name)
+            if not await asyncio.to_thread(reserve_daily_request, model_name):
+                await asyncio.to_thread(log_model_request, "google", model_name, "skipped_quota",
+                    int((time.monotonic() - started) * 1000), "daily_cap", str(message.chat_id))
+                continue
+            response = await gemini_async.models.generate_content(
+                model=model_name,
+                contents=[prompt],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=ActivityUpdateProposal,
+                    temperature=0.1,
+                ),
+            )
+            parsed = getattr(response, "parsed", None)
+            if isinstance(parsed, ActivityUpdateProposal):
+                proposal = parsed
+            elif getattr(response, "text", None):
+                proposal = ActivityUpdateProposal.model_validate_json(response.text)
+            if proposal:
+                await asyncio.to_thread(log_model_request, "google", model_name, "success",
+                    int((time.monotonic() - started) * 1000), "", str(message.chat_id))
+                break
+            await asyncio.to_thread(log_model_request, "google", model_name, "empty_response",
+                int((time.monotonic() - started) * 1000), "empty_response", str(message.chat_id))
+        except Exception as exc:
+            err = str(exc).lower()
+            retryable = any(x in err for x in ("429", "resource_exhausted", "quota", "rate limit", "too many requests"))
+            await asyncio.to_thread(log_model_request, "google", model_name, "error",
+                int((time.monotonic() - started) * 1000),
+                "quota_or_rate_limit" if retryable else type(exc).__name__, str(message.chat_id))
+            if not (retryable and model_index + 1 < len(models_to_try)):
+                log.exception("Could not parse authorized activity update.")
+                break
+    if not proposal:
+        await message.reply_text("لم أستطع تحليل التحديث بأمان. لم يتم حفظ أي تغيير.")
+        return
+    if proposal.clarification_needed or proposal.confidence < 0.75:
+        question = proposal.clarification_question.strip() or "محتاج توضيح: ما النشاط أو المجموعة أو التاريخ المقصود؟"
+        await message.reply_text(f"لم أحفظ أي تغيير بعد. {question}")
+        return
+    for value in (proposal.effective_start, proposal.effective_end):
+        if value:
+            try:
+                date.fromisoformat(value)
+            except ValueError:
+                await message.reply_text("التاريخ غير واضح؛ لم يتم حفظ التغيير. استخدم تاريخاً واضحاً.")
+                return
+    stamp = utc_now()
+    try:
+        await asyncio.to_thread(
+            _exec,
+            """INSERT INTO activity_changes
+               (activity_key,activity_type,status,effective_start,effective_end,details,related_activity,
+                source_chat_id,source_message_id,created_by,created_at,updated_by,updated_at,active)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
+            (proposal.activity_key[:160], proposal.activity_type, proposal.status,
+             proposal.effective_start, proposal.effective_end, proposal.details[:2000],
+             proposal.related_activity[:160], message.chat_id, message.message_id,
+             update.effective_user.id, stamp, update.effective_user.id, stamp),
+        )
+    except Exception:
+        log.exception("Could not persist activity change.")
+        await message.reply_text("تعذر حفظ التحديث في قاعدة البيانات.")
+        return
+    await message.reply_text(
+        f"تم حفظ تحديث النشاط في Turso.\nالنشاط: {proposal.activity_key}\n"
+        f"النوع: {proposal.activity_type}\nالحالة: {proposal.status}\n"
+        f"التفاصيل: {proposal.details or 'لا توجد تفاصيل إضافية'}\n"
+        "تنبيه: التسجيل محفوظ؛ تطبيقه على إجابات الجدول يحتاج خطوة قراءة/أولوية منفصلة."
+    )
+
+
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await require_leader(update, context):
         return
@@ -1691,6 +1804,7 @@ def main() -> None:
     app.add_handler(CommandHandler("setleaders", setleaders_command))
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("setterm", setterm_command))
+    app.add_handler(CommandHandler("addinfo", addinfo_command))
     app.add_handler(CommandHandler("addword", addword_command))
     app.add_handler(CommandHandler("delword", delword_command))
     app.add_handler(CommandHandler("listwords", listwords_command))
