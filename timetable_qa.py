@@ -78,13 +78,16 @@ def _groups_from_text(value:Any)->set[int]:
 def _time(value:Any)->str:
     raw=str(value or "").strip();return raw[:5] if raw else "time not specified"
 
-def answer_timetable_question(db:Any,text:str)->str|None:
+def answer_timetable_question(db:Any,text:str,term_start:str="",term_end:str="")->str|None:
     if not looks_like_schedule_question(text):return None
     try:
         aliases=load_aliases(db); intent=resolve_intent(text,aliases)
         if intent["exam"]:
             sql="SELECT event_date,day,assessment_type,subject,activity_component,source_text,review_note FROM exam_events WHERE year_level=?"
             args:list[Any]=["First year"]
+            if term_bounds:
+                sql+=" AND event_date>=? AND event_date<=?"
+                args.extend(term_bounds)
             if intent["date"]:sql+=" AND event_date=?";args.append(intent["date"])
             if intent["subject"]:sql+=" AND lower(subject)=lower(?)";args.append(intent["subject"])
             if intent["next"]:sql+=" AND event_date>=?";args.append(datetime.now(CAIRO).date().isoformat())
@@ -97,6 +100,9 @@ def answer_timetable_question(db:Any,text:str)->str|None:
             return "\n".join(lines)[:3800]
         sql="""SELECT event_date,day,start_time,end_time,subject,activity_type,groups_text,room_text,group_room_association,review_note,source_page FROM timetable_events WHERE year_level=?"""
         args=["First year"]
+        if term_bounds:
+            sql+=" AND event_date>=? AND event_date<=?"
+            args.extend(term_bounds)
         if intent["date"]:sql+=" AND event_date=?";args.append(intent["date"])
         if intent["weekday"]:sql+=" AND day=?";args.append(intent["weekday"])
         if intent["subject"]:sql+=" AND lower(subject)=lower(?)";args.append(intent["subject"])
