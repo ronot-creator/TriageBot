@@ -139,10 +139,7 @@ def answer_timetable_question(db:Any,text:str,term_start:str="",term_end:str="")
             if intent["date_start"] and intent["date_end"]:
                 sql+=" AND event_date>=? AND event_date<=?"
                 args.extend((intent["date_start"],intent["date_end"]))
-            if intent["date_start"] and intent["date_end"]:
-            sql+=" AND event_date>=? AND event_date<=?"
-            args.extend((intent["date_start"],intent["date_end"]))
-        if intent["date"]:sql+=" AND event_date=?";args.append(intent["date"])
+            if intent["date"]:sql+=" AND event_date=?";args.append(intent["date"])
             if intent["subject"]:sql+=" AND lower(subject)=lower(?)";args.append(intent["subject"])
             if intent["next"]:sql+=" AND event_date>=?";args.append(datetime.now(CAIRO).date().isoformat())
             sql+=" ORDER BY event_date LIMIT 30"; rows=db.execute(sql,tuple(args)).rows
@@ -157,6 +154,9 @@ def answer_timetable_question(db:Any,text:str,term_start:str="",term_end:str="")
         if term_bounds:
             sql+=" AND event_date>=? AND event_date<=?"
             args.extend(term_bounds)
+        if intent["date_start"] and intent["date_end"]:
+            sql+=" AND event_date>=? AND event_date<=?"
+            args.extend((intent["date_start"],intent["date_end"]))
         if intent["date"]:sql+=" AND event_date=?";args.append(intent["date"])
         if intent["weekday"]:sql+=" AND day=?";args.append(intent["weekday"])
         if intent["subject"]:sql+=" AND lower(subject)=lower(?)";args.append(intent["subject"])
