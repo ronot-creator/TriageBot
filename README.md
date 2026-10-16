@@ -10,7 +10,11 @@ Use `LEADER_TELEGRAM_IDS` for a comma-separated allowlist of trusted leader user
 
 Optional existing settings and the new college-data settings are documented in [`.env.example`](.env.example). Put real values in Render's environment settings, not in GitHub. `NEWS_CHANNEL_ID` and `DISCUSSION_GROUP_ID` must be numeric Telegram chat IDs, not invite links.
 
-## Student help and private support\n\n`/help` shows students the bot’s purpose, supported timetable/FAQ/announcement capabilities, and usage guidance. `/morehelp` accepts a question in private chat and sends it to the configured owner Telegram account (`OWNER_TELEGRAM_ID`); it does not depend on a Telegram leaders’ group. The owner must have opened the bot and pressed Start at least once so Telegram permits the bot to initiate a private message. Set optional `OWNER_USERNAME` to the owner’s public username (without `@`) to display it in help. Questions are not sent from group chat, to avoid exposing student queries publicly.\n\n## Database migration
+## Student help and private support
+
+`/help` shows students the bot’s purpose, supported timetable/FAQ/announcement capabilities, and usage guidance. `/morehelp` accepts a question in private chat and sends it to the configured owner Telegram account (`OWNER_TELEGRAM_ID`); it does not depend on a Telegram leaders’ group. The owner must have opened the bot and pressed Start at least once so Telegram permits the bot to initiate a private message. Set optional `OWNER_USERNAME` to the owner’s public username (without `@`) to display it in help. Questions are not sent from group chat, to avoid exposing student queries publicly.
+
+## Database migration
 
 On startup, the bot creates missing tables and indexes with `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`. Existing tables and records are not dropped or recreated. Back up the Turso database before deploying any schema-changing release.
 
