@@ -243,6 +243,18 @@ def init_db() -> None:
             requests INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (usage_date, model_name)
         )""",
+        """CREATE TABLE IF NOT EXISTS model_request_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usage_date TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model_name TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            duration_ms INTEGER,
+            error_category TEXT NOT NULL DEFAULT '',
+            session_key TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_model_request_log_date_provider ON model_request_log(usage_date, provider, model_name)",
         """CREATE TABLE IF NOT EXISTS processed_messages (
             chat_id INTEGER NOT NULL,
             message_id INTEGER NOT NULL,
@@ -384,7 +396,7 @@ def reserve_daily_request(model_name: str = MODEL_NAME) -> bool:
     if model_name not in APPROVED_MODELS:
         log.error("Refusing unapproved Gemini model: %s", model_name)
         return False
-    day = datetime.now(timezone.utc).date().isoformat()
+    day = datetime.now(QENA_TZ).date().isoformat()
     _exec("INSERT OR IGNORE INTO model_usage(usage_date,model_name,requests) VALUES (?,?,0)", (day, model_name))
     result = _exec(
         "UPDATE model_usage SET requests=requests+1 WHERE usage_date=? AND model_name=? AND requests < ?",
@@ -395,6 +407,18 @@ def reserve_daily_request(model_name: str = MODEL_NAME) -> bool:
     _exec("INSERT OR IGNORE INTO api_usage(usage_date,requests) VALUES (?,0)", (day,))
     _exec("UPDATE api_usage SET requests=requests+1 WHERE usage_date=?", (day,))
     return True
+
+
+def log_model_request(provider: str, model_name: str, outcome: str, duration_ms: int | None = None,
+                      error_category: str = "", session_key: str = "") -> None:
+    """Record provider/model attempts without storing prompts, secrets, or raw error text."""
+    _exec(
+        """INSERT INTO model_request_log
+           (usage_date,provider,model_name,outcome,duration_ms,error_category,session_key,created_at)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (datetime.now(QENA_TZ).date().isoformat(), provider, model_name, outcome,
+         duration_ms, error_category[:80], session_key[:160], utc_now()),
+    )
 
 
 def claim_message_for_processing(chat_id: int, message_id: int) -> bool:
