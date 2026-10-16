@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from typing import Any
 
 CAIRO=ZoneInfo("Africa/Cairo")
-SCHEDULE_TERMS=("timetable","schedule","lecture","practical","section","gd","tbl","pg","group","room","hall","when is","what do we have","what is on","جدول","محاضرة","محاضرات","عملي","سكشن","سيكشن","جروب","مجموعة","قاعة","مدرج","امتحان","امتحانات","ميدترم","فاينل","امتى","متى","النهارده","انهارده")
+SCHEDULE_TERMS=("timetable","schedule","lecture","practical","section","gd","tbl","pg","group","room","hall","when is","what do we have","what is on","جدول","محاضرة","محاضرات","عملي","سكشن","سيكشن","جروب","مجموعة","قاعة","مدرج","امتحان","امتحانات","ميدترم","فاينل","امتى","متى","النهارده","انهارده","group discussion","group discussions","discussion group","group discussions","مناقشة جماعية","مناقشات جماعية","جروب ديسكشن","ديسكشن")
 EXAM_TERMS=("exam","exams","midterm","mid term","final","امتحان","امتحانات","ميدترم","فاينل")
 ACTIVITY_CANONICAL={"lecture","practical","gd","tbl","pg"}
 
