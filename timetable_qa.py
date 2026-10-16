@@ -123,13 +123,25 @@ def answer_timetable_question(db:Any,text:str,term_start:str="",term_end:str="")
             if term_bounds:
                 sql+=" AND event_date>=? AND event_date<=?"
                 args.extend(term_bounds)
+            if intent["date_start"] and intent["date_end"]:
+                sql+=" AND event_date>=? AND event_date<=?"
+                args.extend((intent["date_start"],intent["date_end"]))
+            if intent["date"]:sql+=" AND event_date=?";args.append(intent["date"])
             rows=db.execute(sql,tuple(args)).rows
             matching=[]
             for row in rows:
                 activity=normalize_text(row[0])
                 if any(term in activity for term in gd_terms) and group in _groups_from_text(row[1]):
                     matching.append(row)
-            return f"حسب جدول السنة الأولى المستورد، للمجموعة {group} عدد {len(matching)} من جلسات Group Discussion (GD). هذا العدد يشمل كل التواريخ الموجودة في الملف المستورد، وليس فصلاً دراسياً محدداً."
+            if intent["date_start"] and intent["date_end"]:
+                period=f"خلال الفترة من {intent['date_start']} إلى {intent['date_end']}"
+            elif intent["date"]:
+                period=f"في تاريخ {intent['date']}"
+            elif term_bounds:
+                period=f"خلال الفصل المحدد من {term_bounds[0]} إلى {term_bounds[1]}"
+            else:
+                period="ضمن كل التواريخ الموجودة في ملف السنة الأولى المستورد"
+            return f"حسب الجدول المستورد، للمجموعة {group} عدد {len(matching)} من جلسات Group Discussion (GD) {period}."
         if intent["exam"]:
             sql="SELECT event_date,day,assessment_type,subject,activity_component,source_text,review_note FROM exam_events WHERE year_level=?"
             args:list[Any]=["First year"]
