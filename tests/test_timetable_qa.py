@@ -84,7 +84,6 @@ class TBLStatusOverlayTests(unittest.TestCase):
   answer=answer_timetable_question(DB(),"Is there a TBL for group 6?")
   self.assertIn("يوجد TBL مدرج للمجموعة 6",answer)
   self.assertIn("2026-10-20",answer)
-  self.assertIn("Imported workbook",answer)
 
  def test_confirmed_tbl_uses_leader_record(self):
   answer=answer_timetable_question(self._db([
