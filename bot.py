@@ -345,6 +345,10 @@ def get_active_keywords() -> list[str]:
     return [str(row[0]) for row in result.rows]
 
 def is_blacklisted(user_id: int) -> bool:
+    # The configured owner is a protected principal and can never be suppressed by
+    # a stale or malicious blacklist row.
+    if OWNER_ID is not None and user_id == OWNER_ID:
+        return False
     return bool(_exec("SELECT 1 FROM blacklist WHERE user_id = ?", (user_id,)).rows)
 
 def add_ticket(
@@ -1777,6 +1781,13 @@ async def blacklist_ticket_callback(
         await update.callback_query.answer("لم أجد صاحب البلاغ.", show_alert=True)
         return
     user_id = int(row[3])
+    if OWNER_ID is not None and user_id == OWNER_ID:
+        await update.callback_query.answer(
+            "لا يمكن لأي قائد إضافة مالك البوت إلى القائمة السوداء؛ صلاحيات المالك محمية.",
+            show_alert=True,
+        )
+        log.warning("Blocked blacklist attempt against bot owner by actor_id=%s ticket_id=%s", actor_id, ticket_id)
+        return
     _exec(
         "INSERT INTO blacklist(user_id, reason, added_by, created_at) VALUES (?, ?, ?, ?) "
         "ON CONFLICT(user_id) DO UPDATE SET reason=excluded.reason, added_by=excluded.added_by, created_at=excluded.created_at",
