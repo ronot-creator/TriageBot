@@ -1384,32 +1384,21 @@ async def setleaders_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 async def setterm_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Set the current term boundary in Turso (not environment variables)."""
+    """Set active term label; dates are derived automatically from Qena local time."""
     message = update.effective_message
     if not update.effective_user or update.effective_user.id != OWNER_ID:
         await message.reply_text("الأمر ده متاح لمالك البوت فقط.")
         return
-    if len(context.args) != 2:
-        await message.reply_text(
-            "استخدم: /setterm YYYY-MM-DD YYYY-MM-DD\n"
-            "مثال: /setterm 2026-09-01 2027-01-15\n"
-            "اكتب تاريخ بداية ونهاية الفصل الأول حسب التقويم الرسمي."
-        )
+    if len(context.args) != 1:
+        await message.reply_text("استخدم: /setterm term1\nحالياً قاعدة البيانات تحتوي على بيانات الفصل الأول فقط.")
         return
-    try:
-        start = datetime.strptime(context.args[0], "%Y-%m-%d").date()
-        end = datetime.strptime(context.args[1], "%Y-%m-%d").date()
-        if end < start:
-            raise ValueError("end before start")
-    except ValueError:
-        await message.reply_text("التواريخ لازم تكون صحيحة وبصيغة YYYY-MM-DD، والنهاية بعد البداية.")
+    term = context.args[0].strip().lower().replace("-", "").replace("_", "")
+    if term not in {"term1", "1", "first", "firstterm", "الفصلالأول", "الترمالاول"}:
+        await message.reply_text("المتاح حالياً هو term1 فقط، لأن البيانات المستوردة تخص الفصل الأول. لن أفعّل فصلاً آخر قبل استيراد بياناته.")
         return
-    set_config("current_term_start", start.isoformat())
-    set_config("current_term_end", end.isoformat())
-    await message.reply_text(
-        f"تم حفظ حدود الفصل الحالي في Turso: {start.isoformat()} إلى {end.isoformat()}. "
-        "سيستخدمها البوت عند تصفية مواعيد الأنشطة."
-    )
+    set_config("current_term", "term1")
+    local_today = datetime.now(QENA_TZ).date().isoformat()
+    await message.reply_text(f"تم ضبط الفصل الحالي على term1. تاريخ اليوم في قنا: {local_today}. التاريخ يتحدد تلقائياً؛ لا تحتاج لإدخاله يدوياً.")
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
