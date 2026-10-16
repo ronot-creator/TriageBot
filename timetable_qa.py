@@ -92,7 +92,7 @@ def answer_timetable_question(db:Any,text:str)->str|None:
         sql+=" ORDER BY event_date,start_time LIMIT 100"; rows=db.execute(sql,tuple(args)).rows
         if intent["group"] is not None:rows=[r for r in rows if intent["group"] in _groups_from_text(r[6])]
         if not rows:return "لم أجد نشاطاً مطابقاً في جدول السنة الأولى المستورد. قد تكون البيانات ناقصة أو تحتاج صياغة السؤال بشكل أوضح."
-        if not any((intent["subject"],intent["activity"],intent["non_lecture"],intent["group"] is not None,intent["date"],intent["weekday"],intent["next"])):rows=rows[:10]
+        if not any((intent["subject"],intent["activity"],intent["non_lecture"],intent["room"],intent["group"] is not None,intent["date"],intent["weekday"],intent["next"])):rows=rows[:10]
         lines=["الجدول المستورد للسنة الأولى:"]
         for r in rows[:20]:
             extra=[]
