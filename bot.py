@@ -517,8 +517,8 @@ def media_description(message: Message) -> str:
 def make_context(message: Message) -> str:
     try:
         rows = _exec(
-            "SELECT message_id,user_id,role,content FROM conversation_messages WHERE chat_id=? ORDER BY id DESC LIMIT ?",
-            (message.chat_id, CONTEXT_LIMIT + 5),
+            "SELECT message_id,user_id,role,content FROM conversation_messages WHERE chat_id=? AND user_id=? ORDER BY id DESC LIMIT ?",
+            (message.chat_id, message.from_user.id if message.from_user else -1, CONTEXT_LIMIT + 5),
         ).rows
         entries = [
             {"message_id": int(r[0]), "user_id": r[1], "role": str(r[2]), "text": str(r[3]),
@@ -527,7 +527,7 @@ def make_context(message: Message) -> str:
         ]
     except Exception:
         log.exception("Persistent conversation history unavailable; using in-memory context.")
-        entries = list(CHAT_CONTEXT[message.chat_id])[-CONTEXT_LIMIT:]
+        entries = [item for item in CHAT_CONTEXT[message.chat_id] if item.get("user_id") == (message.from_user.id if message.from_user else None)][-CONTEXT_LIMIT:]
     blocks = [
         f"- {item['name']} (message_id={item['message_id']}): {item['text']}"
         for item in entries
@@ -1289,16 +1289,16 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     leader_id = get_leader_chat_id()
     day = datetime.now(timezone.utc).date().isoformat()
     try:
-        row = _exec("SELECT requests FROM api_usage WHERE usage_date=?", (day,)).rows
-        used = int(row[0][0]) if row else 0
+        usage_rows = _exec("SELECT model_name,requests FROM model_usage WHERE usage_date=?", (day,)).rows
+        usage = {str(row[0]): int(row[1]) for row in usage_rows}
         keyword_count = len(get_active_keywords())
         faq_count = len(get_faqs())
         await update.effective_message.reply_text(
-            f"حالة البوت:\n"
-            f"جروب القيادة: {leader_id or 'غير مضبوط'}\n"
-            f"النموذج: {MODEL_NAME}\n"
-            f"استخدام Gemini اليوم: {used}/{RPD_LIMIT}\n"
-            f"حد الدقيقة: {RPM_LIMIT} طلب/دقيقة\n"
+            f"حالة البوت:\\n"
+            f"جروب القيادة: {leader_id or 'غير مضبوط'}\\n"
+            f"النموذج الأساسي: {MODEL_NAME}\\n"
+            f"استخدام اليوم: 3.5 Flash-Lite {usage.get('gemini-3.5-flash-lite', 0)}/{RPD_LIMIT}; 3.1 Flash-Lite {usage.get('gemini-3.1-flash-lite', 0)}/{RPD_LIMIT}\\n"
+            f"حد الدقيقة لكل نموذج: {RPM_LIMIT} طلب/دقيقة\\n"
             f"الكلمات النشطة: {keyword_count}\n"
             f"الأسئلة الشائعة النشطة: {faq_count}\n"
             f"الرد التلقائي من FAQ: {'مفعّل' if AUTO_FAQ_REPLY else 'متوقف'}"
