@@ -80,9 +80,15 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 TURSO_URL = os.getenv("TURSO_DATABASE_URL", "").strip()
 TURSO_TOKEN = os.getenv("TURSO_AUTH_TOKEN", "").strip()
 OWNER_ID_RAW = os.getenv("OWNER_TELEGRAM_ID", "").strip()
-MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
-RPM_LIMIT = max(1, int(os.getenv("GEMINI_RPM_LIMIT", "10")))
-RPD_LIMIT = max(1, int(os.getenv("GEMINI_RPD_LIMIT", "1000")))
+APPROVED_MODELS = {"gemini-3.5-flash-lite", "gemini-3.1-flash-lite"}
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
+FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.1-flash-lite").strip()
+RPM_LIMIT = min(15, max(1, int(os.getenv("GEMINI_PER_MODEL_RPM_LIMIT", "15"))))
+RPD_LIMIT = min(500, max(1, int(os.getenv("GEMINI_PER_MODEL_RPD_LIMIT", "500"))))
+if MODEL_NAME not in APPROVED_MODELS:
+    raise RuntimeError("GEMINI_MODEL must be gemini-3.5-flash-lite or gemini-3.1-flash-lite.")
+if FALLBACK_MODEL not in APPROVED_MODELS or FALLBACK_MODEL == MODEL_NAME:
+    raise RuntimeError("GEMINI_FALLBACK_MODEL must be the other approved Flash-Lite model.")
 MAX_MEDIA_BYTES = max(1, int(os.getenv("MAX_MEDIA_MB", "15"))) * 1024 * 1024
 CONTEXT_LIMIT = max(5, min(40, int(os.getenv("CONTEXT_MESSAGES", "20"))))
 ALLOWED_GROUP_ID_RAW = os.getenv("ALLOWED_GROUP_ID", "").strip()
@@ -92,7 +98,6 @@ ALLOW_LOCAL_DB = os.getenv("ALLOW_LOCAL_DB", "0").lower() in {"1", "true", "yes"
 NEWS_CHANNEL_ID_RAW = os.getenv("NEWS_CHANNEL_ID", "").strip()
 DISCUSSION_GROUP_ID_RAW = os.getenv("DISCUSSION_GROUP_ID", "").strip()
 LEADER_IDS_RAW = os.getenv("LEADER_TELEGRAM_IDS", "").strip()
-FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "").strip()
 NEWS_CHANNEL_ID = int(NEWS_CHANNEL_ID_RAW) if NEWS_CHANNEL_ID_RAW.lstrip("-").isdigit() else None
 DISCUSSION_GROUP_ID = int(DISCUSSION_GROUP_ID_RAW) if DISCUSSION_GROUP_ID_RAW.lstrip("-").isdigit() else None
 LEADER_IDS = {int(value.strip()) for value in LEADER_IDS_RAW.split(",") if value.strip().isdigit()}
@@ -142,7 +147,7 @@ BOT_READY = False
 
 # Context only includes messages observed since this process started.
 CHAT_CONTEXT: dict[int, deque[dict]] = defaultdict(lambda: deque(maxlen=CONTEXT_LIMIT))
-AI_REQUEST_TIMES: deque[float] = deque()
+AI_REQUEST_TIMES: dict[str, deque[float]] = defaultdict(deque)
 AI_RATE_LOCK = asyncio.Lock()
 BOT_USERNAME: Optional[str] = None
 
@@ -220,6 +225,12 @@ def init_db() -> None:
         """CREATE TABLE IF NOT EXISTS api_usage (
             usage_date TEXT PRIMARY KEY,
             requests INTEGER NOT NULL DEFAULT 0
+        )""",
+        """CREATE TABLE IF NOT EXISTS model_usage (
+            usage_date TEXT NOT NULL,
+            model_name TEXT NOT NULL,
+            requests INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (usage_date, model_name)
         )""",
         """CREATE TABLE IF NOT EXISTS processed_messages (
             chat_id INTEGER NOT NULL,
@@ -339,16 +350,22 @@ def get_faq(faq_id: int):
     )
     return result.rows[0] if result.rows else None
 
-def reserve_daily_request() -> bool:
-    """Atomically reserve one daily Gemini request across concurrent handlers."""
+def reserve_daily_request(model_name: str = MODEL_NAME) -> bool:
+    """Atomically reserve one request against the approved model's daily cap."""
+    if model_name not in APPROVED_MODELS:
+        log.error("Refusing unapproved Gemini model: %s", model_name)
+        return False
     day = datetime.now(timezone.utc).date().isoformat()
-    _exec("INSERT OR IGNORE INTO api_usage(usage_date, requests) VALUES (?, 0)", (day,))
+    _exec("INSERT OR IGNORE INTO model_usage(usage_date,model_name,requests) VALUES (?,?,0)", (day, model_name))
     result = _exec(
-        "UPDATE api_usage SET requests=requests+1 "
-        "WHERE usage_date=? AND requests < ?",
-        (day, RPD_LIMIT),
+        "UPDATE model_usage SET requests=requests+1 WHERE usage_date=? AND model_name=? AND requests < ?",
+        (day, model_name, RPD_LIMIT),
     )
-    return int(getattr(result, "rows_affected", 0)) == 1
+    if int(getattr(result, "rows_affected", 0)) != 1:
+        return False
+    _exec("INSERT OR IGNORE INTO api_usage(usage_date,requests) VALUES (?,0)", (day,))
+    _exec("UPDATE api_usage SET requests=requests+1 WHERE usage_date=?", (day,))
+    return True
 
 
 def claim_message_for_processing(chat_id: int, message_id: int) -> bool:
@@ -582,19 +599,20 @@ async def get_media_part(message: Message):
         log.warning("Could not download media: %s", exc)
         return None, mime_type, "تعذر تنزيل الملف لفحصه."
 
-async def wait_for_rpm_slot() -> None:
-    # Never sleep while holding the lock: otherwise one queued request blocks
-    # every other handler from re-checking the rolling window.
+async def wait_for_rpm_slot(model_name: str = MODEL_NAME) -> None:
+    """Apply a rolling per-model RPM cap."""
     while True:
         async with AI_RATE_LOCK:
+            queue = AI_REQUEST_TIMES[model_name]
             now = time.monotonic()
-            while AI_REQUEST_TIMES and now - AI_REQUEST_TIMES[0] >= 60:
-                AI_REQUEST_TIMES.popleft()
-            if len(AI_REQUEST_TIMES) < RPM_LIMIT:
-                AI_REQUEST_TIMES.append(now)
+            while queue and now - queue[0] >= 60:
+                queue.popleft()
+            if len(queue) < RPM_LIMIT:
+                queue.append(now)
                 return
-            wait_seconds = max(0.1, 60 - (now - AI_REQUEST_TIMES[0]))
+            wait_seconds = max(0.1, 60 - (now - queue[0]))
         await asyncio.sleep(wait_seconds)
+
 
 async def call_gemini(
     message: Message,
@@ -604,16 +622,6 @@ async def call_gemini(
     media_problem: Optional[str],
     urgency_hint: Optional[str],
 ) -> Optional[TriageResult]:
-    await wait_for_rpm_slot()
-    try:
-        allowed = await asyncio.to_thread(reserve_daily_request)
-    except Exception:
-        log.exception("Could not reserve daily API quota.")
-        return None
-    if not allowed:
-        log.warning("Gemini daily request limit reached.")
-        return None
-
     faqs = await asyncio.to_thread(get_faqs)
     faq_payload = json.dumps(faqs, ensure_ascii=False)
     try:
@@ -674,6 +682,14 @@ async def call_gemini(
         models_to_try.append(FALLBACK_MODEL)
     for model_index, model_name in enumerate(models_to_try):
         try:
+            if model_name not in APPROVED_MODELS:
+                log.error("Refusing unapproved Gemini model: %s", model_name)
+                return None
+            await wait_for_rpm_slot(model_name)
+            allowed = await asyncio.to_thread(reserve_daily_request, model_name)
+            if not allowed:
+                log.warning("Daily request cap reached for %s; considering approved fallback.", model_name)
+                continue
             response = await gemini_async.models.generate_content(
                 model=model_name,
                 contents=contents,
@@ -696,15 +712,6 @@ async def call_gemini(
             retryable = any(token in error_text for token in ("429", "resource_exhausted", "quota", "rate limit", "too many requests"))
             if model_index + 1 < len(models_to_try) and retryable:
                 log.warning("Primary model %s hit a quota/rate limit; trying configured fallback %s.", model_name, models_to_try[model_index + 1])
-                try:
-                    await wait_for_rpm_slot()
-                    fallback_quota = await asyncio.to_thread(reserve_daily_request)
-                except Exception:
-                    log.exception("Could not reserve quota for the fallback model.")
-                    return None
-                if not fallback_quota:
-                    log.warning("Global daily request limit prevents fallback attempt.")
-                    return None
                 continue
             log.exception("Gemini request failed for model %s.", model_name)
             return None
