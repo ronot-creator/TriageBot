@@ -782,37 +782,6 @@ async def call_gemini(
             log.exception("Gemini request failed for model %s.", model_name)
             return None
     return None
-            await wait_for_rpm_slot(model_name)
-            allowed = await asyncio.to_thread(reserve_daily_request, model_name)
-            if not allowed:
-                log.warning("Daily request cap reached for %s; considering approved fallback.", model_name)
-                continue
-            response = await gemini_async.models.generate_content(
-                model=model_name,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=TriageResult,
-                    temperature=0.1,
-                ),
-            )
-            parsed = getattr(response, "parsed", None)
-            if isinstance(parsed, TriageResult):
-                return parsed
-            raw = getattr(response, "text", None)
-            if raw:
-                return TriageResult.model_validate_json(raw)
-            log.error("Gemini returned no parsable content from model %s.", model_name)
-            return None
-        except Exception as exc:
-            error_text = str(exc).lower()
-            retryable = any(token in error_text for token in ("429", "resource_exhausted", "quota", "rate limit", "too many requests"))
-            if model_index + 1 < len(models_to_try) and retryable:
-                log.warning("Primary model %s hit a quota/rate limit; trying configured fallback %s.", model_name, models_to_try[model_index + 1])
-                continue
-            log.exception("Gemini request failed for model %s.", model_name)
-            return None
-    return None
 
 # ----------------------------- Ticket delivery ---------------------------
 
