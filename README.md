@@ -15,7 +15,7 @@ Optional existing settings and the new college-data settings are documented in [
 On startup, the bot creates missing tables and indexes with `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`. Existing tables and records are not dropped or recreated. Back up the Turso database before deploying any schema-changing release.
 
 New tables:
-- `conversation_messages`: bounded persistent context, separated by chat.
+- `conversation_messages`: bounded persistent context, queried per chat and user so separate users' histories are not mixed.
 - `timetable_imports`: source-file hash, uploader, import preview, validation warnings and approval state.
 - `timetable_entries`: normalized date/weekday, start/end time, course, session type, location, instructor, status and source row.
 - `timetable_changes`: audit log of leader edits.
@@ -50,3 +50,19 @@ Telegram bot updates do not provide automatic backfill of all old channel histor
 ## Testing
 
 Run `python -m compileall -q .` and `python -m unittest discover -s tests -v`. GitHub Actions runs these checks on pushes to `main` and pull requests.
+
+## First-year timetable workbook (source-grounded Q&A)
+
+The dedicated workbook importer creates `timetable_events`, `exam_events`, `translation_aliases`, `interpretation_rules`. It is separate from the leader-approved generic `timetable_entries` import flow.
+
+To load the supplied workbook using the web-only workflow, upload `Medical_Timetable_FirstYear_Complete.xlsx` to `assets/` on the deployed branch via GitHub's web UI, then set Render's Start Command to:
+
+```sh
+python import_timetable.py assets/Medical_Timetable_FirstYear_Complete.xlsx && python bot.py
+```
+
+The importer runs before the bot and must succeed before the service starts. See [TIMETABLE_IMPORT.md](TIMETABLE_IMPORT.md). Timetable questions use deterministic alias resolution and parameterized SQL; the model is not allowed to invent schedule facts or generate SQL. Group IDs are matched exactly, and room-sharing/source uncertainty is preserved.
+
+## Gemini model policy
+
+Only `gemini-3.5-flash-lite` and `gemini-3.1-flash-lite` are accepted. The default is 3.5 Flash-Lite with 3.1 Flash-Lite as fallback. Per-model limits default to 15 requests/minute and 500 requests/day; application settings clamp them to those maximums. Google enforces token-per-minute limits at the API. These controls do not guarantee a free quota is available, and a provider quota response still triggers fallback when possible.
