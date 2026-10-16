@@ -1,6 +1,6 @@
 import unittest
 from datetime import date
-from timetable_qa import normalize_text, looks_like_schedule_question, resolve_intent, _groups_from_text
+from timetable_qa import normalize_text, looks_like_schedule_question, resolve_intent, _groups_from_text, answer_timetable_question
 ALIASES=[
  {"entity_type":"Subject","canonical_value":"Anatomy","alias":"Anatomy","notes":""},
  {"entity_type":"Subject","canonical_value":"Physiology","alias":"Physiology","notes":""},
@@ -26,4 +26,31 @@ class TimetableIntentTests(unittest.TestCase):
  def test_invalid_date(self):self.assertIsNone(resolve_intent("Anatomy 31/02/2027",ALIASES,date(2026,10,16))["date"])
  def test_arabic_room_alias(self):self.assertEqual(resolve_intent("Where is مدرج 8?",ALIASES,date(2026,10,16))["room"],"Hall 8")
  def test_tomorrow_is_resolved_by_code(self):self.assertEqual(resolve_intent("What do we have tomorrow?",ALIASES,date(2026,10,16))["date"],"2026-10-17")
+class TermBoundaryTests(unittest.TestCase):
+ def test_explicit_term_without_config_asks_for_reliable_boundaries(self):
+  class EmptyDB:
+   def execute(self,sql,args=()):
+    class Result:
+     rows=[]
+    return Result()
+  answer=answer_timetable_question(EmptyDB(),"How many GDs do we have this semester?")
+  self.assertIn("حدود الفصل الدراسي الحالي",answer)
+
+ def test_term_dates_are_applied_to_gd_count_query(self):
+  class RecordingDB:
+   def __init__(self):self.query=None
+   def execute(self,sql,args=()):
+    class Result:
+     def __init__(self,rows):self.rows=rows
+    if "FROM translation_aliases" in sql:return Result([])
+    if "SELECT activity_type,groups_text,event_date FROM timetable_events" in sql:
+     self.query=(sql,args)
+     return Result([("GD","Group 6","2026-10-10"),("GD","Group 6","2026-11-10")])
+    raise AssertionError("Unexpected query: "+sql)
+  db=RecordingDB()
+  answer=answer_timetable_question(db,"How many GDs does group 6 have this term?","2026-10-01","2026-10-31")
+  self.assertIn("عدد 1",answer)
+  self.assertIn("event_date>=? AND event_date<=?",db.query[0])
+  self.assertEqual(db.query[1],("First year","2026-10-01","2026-10-31"))
+
 if __name__=="__main__":unittest.main()
