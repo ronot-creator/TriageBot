@@ -73,7 +73,13 @@ def resolve_intent(text:str,aliases:list[dict[str,str]],today:date|None=None)->d
     return intent
 
 def _groups_from_text(value:Any)->set[int]:
-    return {int(x) for x in re.findall(r"(?<!\d)(\d{1,2})(?!\d)",str(value or ""))}
+    normalized=normalize_text(value)
+    groups={int(x) for x in re.findall(r"(?<!\d)(\d{1,2})(?!\d)",normalized)}
+    word_numbers={"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,"eight":8,"nine":9,"ten":10,"واحد":1,"واحدة":1,"اتنين":2,"اثنين":2,"تلاتة":3,"ثلاثة":3,"اربعة":4,"خمسة":5,"ستة":6,"سبعة":7,"تمانية":8,"ثمانية":8,"تسعة":9,"عشرة":10}
+    for word,number in word_numbers.items():
+        if re.search(r"(?<![a-z0-9])"+re.escape(normalize_text(word))+r"(?![a-z0-9])",normalized):
+            groups.add(number)
+    return groups
 
 def _time(value:Any)->str:
     raw=str(value or "").strip();return raw[:5] if raw else "time not specified"
@@ -82,6 +88,25 @@ def answer_timetable_question(db:Any,text:str)->str|None:
     if not looks_like_schedule_question(text):return None
     try:
         aliases=load_aliases(db); intent=resolve_intent(text,aliases)
+        normalized=normalize_text(text)
+        count_intent=bool(re.search(r"\\b(how many|count|number of|كم|كام|عدد)\\b",normalized))
+        gd_terms=("group discussion","group discussions","discussion group","gd","مناقشة جماعية","مناقشات جماعية","جروب ديسكشن","ديسكشن")
+        is_gd_count=count_intent and any(term in normalized for term in gd_terms)
+        if is_gd_count:
+            group=intent["group"]
+            if group is None:
+                word_group=re.search(r"(?:group|grp|جروب|مجموعة)\\s+(one|two|three|four|five|six|seven|eight|nine|ten|واحد|واحدة|اتنين|اثنين|تلاتة|ثلاثة|اربعة|خمسة|ستة|سبعة|تمانية|ثمانية|تسعة|عشرة)\\b",normalized)
+                words={"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,"eight":8,"nine":9,"ten":10,"واحد":1,"واحدة":1,"اتنين":2,"اثنين":2,"تلاتة":3,"ثلاثة":3,"اربعة":4,"خمسة":5,"ستة":6,"سبعة":7,"تمانية":8,"ثمانية":8,"تسعة":9,"عشرة":10}
+                if word_group: group=words.get(word_group.group(1))
+            if group is None:
+                return "أقدر أحسبها من الجدول، لكن أحتاج رقم المجموعة أولاً. تقصد أي مجموعة؟"
+            rows=db.execute("SELECT activity_type,groups_text,event_date FROM timetable_events WHERE year_level=?",("First year",)).rows
+            matching=[]
+            for row in rows:
+                activity=normalize_text(row[0])
+                if any(term in activity for term in gd_terms) and group in _groups_from_text(row[1]):
+                    matching.append(row)
+            return f"حسب جدول السنة الأولى المستورد، للمجموعة {group} عدد {len(matching)} من جلسات Group Discussion (GD). هذا العدد يشمل كل التواريخ الموجودة في الملف المستورد، وليس فصلاً دراسياً محدداً."
         if intent["exam"]:
             sql="SELECT event_date,day,assessment_type,subject,activity_component,source_text,review_note FROM exam_events WHERE year_level=?"
             args:list[Any]=["First year"]
