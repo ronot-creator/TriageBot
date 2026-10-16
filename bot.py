@@ -951,7 +951,12 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 )
             except TelegramError:
                 log.exception("Could not send timetable answer.")
-            return
+            # Ordinary timetable questions should receive a direct answer without
+            # becoming tickets. If the same message also explicitly triggered triage
+            # (mention, reply to the bot, or a configured keyword), continue through
+            # the original triage path so timetable handling cannot swallow a report.
+            if not (mentioned or replied_to_bot or keyword):
+                return
 
     hint, cleaned = urgency_hint_and_clean_text(raw_text)
     # Keep original text intact in the prompt and ticket. Cleaned text is only a readable supplement.
@@ -1340,27 +1345,67 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    owner_label = f"@{OWNER_USERNAME}" if OWNER_USERNAME else "مسؤول البوت"
-    await update.effective_message.reply_text(
-        "📚 مساعدة SVU Med Triage Bot\n\n"
-        "ما الذي أستطيع فعله؟\n"
-        "• أساعد في الأسئلة الشائعة المعتمدة.\n"
-        "• أجيب عن أسئلة جدول وامتحانات السنة الأولى عندما تكون المعلومة موجودة في البيانات المحفوظة.\n"
-        "• أراجع الرسائل الجامعية التي تحتاج متابعة، وقد أحيلها إلى المسؤولين للمراجعة.\n"
-        "• أتعامل مع الإعلانات المحفوظة عند توفر مصدر مناسب.\n\n"
-        "كيف تستخدم البوت؟\n"
-        "• اكتب سؤالك بوضوح، واذكر المجموعة أو التاريخ أو المادة عند السؤال عن الجدول.\n"
-        "• استخدم /timetable متبوعاً بكلمات البحث للبحث في السجلات المتاحة.\n"
-        "• إذا لم أجد معلومة مؤكدة، فقد أطلب مراجعة بشرية بدلاً من التخمين.\n"
-        "• البوت ليس بديلاً عن الطبيب أو عن إعلان رسمي؛ تأكد من المواعيد المهمة من المصدر الرسمي.\n\n"
-        "الأوامر المتاحة للطلاب:\n"
-        "/start — بدء الاستخدام\n"
-        "/help — عرض هذه المساعدة\n"
-        "/morehelp — إرسال استفسار خاص إلى " + owner_label + "\n\n"
-        "لإرسال استفسار خاص، افتح المحادثة الخاصة مع البوت ثم أرسل /morehelp واتبع التعليمات. "
-        "رسالتك ستصل إلى مسؤول البوت للمراجعة، لكن الرد ليس فورياً أو مضموناً."
-    )
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
 
+    is_owner = user.id == OWNER_ID
+    is_authorized_leader = is_owner or await is_leader(update, context)
+    owner_label = f"@{OWNER_USERNAME}" if OWNER_USERNAME else "مسؤول البوت"
+
+    sections = [
+        "📚 مساعدة SVU Med Triage Bot",
+        "",
+        "للطلبة والجميع:",
+        "/start — بدء الاستخدام",
+        "/help — عرض المساعدة المناسبة لصلاحياتك",
+        "/morehelp — إرسال استفسار خاص لمسؤول البوت",
+        "",
+        "اكتب سؤالك بوضوح. لأسئلة الجدول، اذكر المجموعة أو التاريخ أو المادة إن أمكن.",
+        "إذا لم تتوفر معلومة موثوقة، سأوضح ذلك بدلاً من التخمين. تأكد من المواعيد المهمة من المصدر الرسمي.",
+    ]
+
+    if is_authorized_leader:
+        sections.extend([
+            "",
+            "🛡️ أوامر القيادة:",
+            "/status — حالة البوت والاستخدام",
+            "/setterm term1 — تحديد الفصل المتاح (بيانات الفصل الأول فقط)",
+            "/date — التاريخ المحلي الحالي",
+            "/addinfo — تسجيل تحديث لنشاط أو جدول",
+            "/addword — إضافة كلمة مفتاحية",
+            "/delword — تعطيل كلمة مفتاحية",
+            "/listwords — عرض الكلمات المفتاحية",
+            "/addfaq سؤال | إجابة | كلمات اختيارية — إضافة سؤال شائع",
+            "/listfaqs — عرض الأسئلة الشائعة",
+            "/delfaq رقم — تعطيل سؤال شائع",
+            "/archivefaq رقم — أرشفة سؤال شائع",
+            "/reviewold — عرض الأسئلة التي تحتاج مراجعة",
+            "/timetable — البحث في بيانات الجدول",
+            "/timetablechange — إدارة تحديثات الجدول",
+            "/pendingannouncements — عرض الإعلانات المعلقة",
+            "/approveannouncement رقم — اعتماد إعلان",
+            "/editannouncement رقم | النص — تعديل إعلان",
+            "/rejectannouncement رقم — رفض إعلان",
+        ])
+
+    if is_owner:
+        sections.extend([
+            "",
+            "👑 أوامر المالك:",
+            "/chatid — عرض معرّف المحادثة لأغراض الإعداد",
+            "/setleaders — تعيين مجموعة القيادة (من المجموعة المقصودة)",
+            "",
+            "صلاحيات المالك تشمل أوامر الطلاب والقيادة والمالك. لا يمكن لأحد آخر تغيير هوية المالك.",
+        ])
+
+    sections.extend([
+        "",
+        f"للدعم الخاص: افتح محادثة البوت الخاصة ثم استخدم /morehelp. المسؤول: {owner_label}.",
+        "الرد على الاستفسارات الخاصة قد لا يكون فورياً.",
+    ])
+    await message.reply_text("\\n".join(sections))
 
 async def morehelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
