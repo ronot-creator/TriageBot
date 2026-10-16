@@ -68,6 +68,7 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    ApplicationHandlerStop,
     filters,
 )
 
@@ -292,6 +293,17 @@ def init_db() -> None:
             active INTEGER NOT NULL DEFAULT 1
         )""",
         "CREATE INDEX IF NOT EXISTS idx_activity_changes_key_active ON activity_changes(activity_key, active)",
+        """CREATE TABLE IF NOT EXISTS pending_clarifications (
+            user_id INTEGER NOT NULL,
+            chat_id INTEGER NOT NULL,
+            original_text TEXT NOT NULL,
+            proposal_json TEXT NOT NULL,
+            question TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(user_id, chat_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_pending_clarifications_chat ON pending_clarifications(chat_id, updated_at)",
     ]
     for statement in statements:
         _exec(statement)
@@ -1517,7 +1529,25 @@ Leader update: {raw}
         return
     if proposal.clarification_needed or proposal.confidence < 0.75:
         question = proposal.clarification_question.strip() or "محتاج توضيح: ما النشاط أو المجموعة أو التاريخ المقصود؟"
-        await message.reply_text(f"لم أحفظ أي تغيير بعد. {question}")
+        try:
+            await asyncio.to_thread(
+                _exec,
+                """INSERT INTO pending_clarifications
+                   (user_id,chat_id,original_text,proposal_json,question,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?)
+                   ON CONFLICT(user_id,chat_id) DO UPDATE SET
+                     original_text=excluded.original_text,
+                     proposal_json=excluded.proposal_json,
+                     question=excluded.question,
+                     updated_at=excluded.updated_at""",
+                (update.effective_user.id, message.chat_id, raw[:4000],
+                 proposal.model_dump_json(), question[:1000], utc_now(), utc_now()),
+            )
+        except Exception:
+            log.exception("Could not persist pending activity clarification.")
+            await message.reply_text("التحديث غير واضح، وتعذر حفظ سؤال التوضيح في قاعدة البيانات. لم يتم حفظ أي تغيير.")
+            return
+        await message.reply_text(f"لم أحفظ أي تغيير بعد. {question}\nرد على السؤال هنا، وسأربط إجابتك بالتحديث المعلّق.")
         return
     for value in (proposal.effective_start, proposal.effective_end):
         if value:
@@ -1549,6 +1579,51 @@ Leader update: {raw}
         f"التفاصيل: {proposal.details or 'لا توجد تفاصيل إضافية'}\n"
         "تنبيه: التسجيل محفوظ؛ تطبيقه على إجابات الجدول يحتاج خطوة قراءة/أولوية منفصلة."
     )
+
+
+async def leader_clarification_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Resume a leader's pending /addinfo clarification, persisted across restarts."""
+    message = update.effective_message
+    user = update.effective_user
+    chat = update.effective_chat
+    if (
+        not message or not user or not chat
+        or chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}
+        or message.text is None
+        or message.text.startswith("/")
+        or chat.id != get_leader_chat_id()
+        or not await is_leader(update, context)
+    ):
+        return
+    try:
+        rows = await asyncio.to_thread(
+            lambda: _exec(
+                "SELECT original_text,question FROM pending_clarifications WHERE user_id=? AND chat_id=?",
+                (user.id, chat.id),
+            ).rows
+        )
+    except Exception:
+        log.exception("Could not load pending leader clarification.")
+        return
+    if not rows:
+        return
+    original_text, previous_question = str(rows[0][0]), str(rows[0][1])
+    answer = message.text.strip()
+    if not answer:
+        return
+    try:
+        await asyncio.to_thread(
+            _exec,
+            "DELETE FROM pending_clarifications WHERE user_id=? AND chat_id=?",
+            (user.id, chat.id),
+        )
+    except Exception:
+        log.exception("Could not consume pending leader clarification.")
+        await message.reply_text("تعذر تحديث حالة سؤال التوضيح؛ لم أتابع لتجنب تكرار التحديث.")
+        raise ApplicationHandlerStop
+    context.args = [f"{original_text}\nPrevious clarification question: {previous_question}\nLeader clarification: {answer}"]
+    await addinfo_command(update, context)
+    raise ApplicationHandlerStop
 
 
 async def date_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1808,6 +1883,10 @@ def main() -> None:
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("morehelp", morehelp_command))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, morehelp_message_handler), group=-1)
+    app.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND,
+        leader_clarification_handler,
+    ), group=-2)
     app.add_handler(CommandHandler("chatid", chatid_command))
     app.add_handler(CommandHandler("setleaders", setleaders_command))
     app.add_handler(CommandHandler("status", status_command))
