@@ -82,13 +82,14 @@ TURSO_TOKEN = os.getenv("TURSO_AUTH_TOKEN", "").strip()
 OWNER_ID_RAW = os.getenv("OWNER_TELEGRAM_ID", "").strip()
 APPROVED_MODELS = {"gemini-3.5-flash-lite", "gemini-3.1-flash-lite"}
 MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
+if MODEL_NAME not in APPROVED_MODELS:
+    log.warning("Ignoring unapproved legacy GEMINI_MODEL=%s; forcing gemini-3.5-flash-lite.", MODEL_NAME)
+    MODEL_NAME = "gemini-3.5-flash-lite"
 FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.1-flash-lite").strip()
+if FALLBACK_MODEL not in APPROVED_MODELS or FALLBACK_MODEL == MODEL_NAME:
+    FALLBACK_MODEL = "gemini-3.1-flash-lite" if MODEL_NAME == "gemini-3.5-flash-lite" else "gemini-3.5-flash-lite"
 RPM_LIMIT = min(15, max(1, int(os.getenv("GEMINI_PER_MODEL_RPM_LIMIT", "15"))))
 RPD_LIMIT = min(500, max(1, int(os.getenv("GEMINI_PER_MODEL_RPD_LIMIT", "500"))))
-if MODEL_NAME not in APPROVED_MODELS:
-    raise RuntimeError("GEMINI_MODEL must be gemini-3.5-flash-lite or gemini-3.1-flash-lite.")
-if FALLBACK_MODEL not in APPROVED_MODELS or FALLBACK_MODEL == MODEL_NAME:
-    raise RuntimeError("GEMINI_FALLBACK_MODEL must be the other approved Flash-Lite model.")
 MAX_MEDIA_BYTES = max(1, int(os.getenv("MAX_MEDIA_MB", "15"))) * 1024 * 1024
 CONTEXT_LIMIT = max(5, min(40, int(os.getenv("CONTEXT_MESSAGES", "20"))))
 ALLOWED_GROUP_ID_RAW = os.getenv("ALLOWED_GROUP_ID", "").strip()
