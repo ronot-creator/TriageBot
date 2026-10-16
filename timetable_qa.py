@@ -170,8 +170,10 @@ def answer_timetable_question(db:Any,text:str,current_term:str="term1")->str|Non
             status = str(status or "unknown").lower()
             if status in {"confirmed", "added"}:
                 label = "مؤكد"
-            elif status in {"cancelled", "removed"}:
-                label = "غير موجود/ملغي حسب آخر تحديث مسجل"
+            elif status == "cancelled":
+                label = "ملغي حسب آخر تحديث مسجل"
+            elif status == "removed":
+                label = "غير موجود حسب آخر تحديث مسجل"
             elif status == "rescheduled":
                 label = "تم تغيير موعده حسب آخر تحديث مسجل"
             else:
