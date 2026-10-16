@@ -734,10 +734,54 @@ async def call_gemini(
     if FALLBACK_MODEL and FALLBACK_MODEL != MODEL_NAME:
         models_to_try.append(FALLBACK_MODEL)
     for model_index, model_name in enumerate(models_to_try):
+        attempt_started = time.monotonic()
         try:
             if model_name not in APPROVED_MODELS:
                 log.error("Refusing unapproved Gemini model: %s", model_name)
                 return None
+            await wait_for_rpm_slot(model_name)
+            allowed = await asyncio.to_thread(reserve_daily_request, model_name)
+            if not allowed:
+                await asyncio.to_thread(log_model_request, "google", model_name, "skipped_quota",
+                    int((time.monotonic() - attempt_started) * 1000), "daily_cap", str(message.chat_id))
+                log.warning("Daily request cap reached for %s; considering approved fallback.", model_name)
+                continue
+            response = await gemini_async.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=TriageResult,
+                    temperature=0.1,
+                ),
+            )
+            parsed = getattr(response, "parsed", None)
+            if isinstance(parsed, TriageResult):
+                await asyncio.to_thread(log_model_request, "google", model_name, "success",
+                    int((time.monotonic() - attempt_started) * 1000), "", str(message.chat_id))
+                return parsed
+            raw = getattr(response, "text", None)
+            if raw:
+                parsed_result = TriageResult.model_validate_json(raw)
+                await asyncio.to_thread(log_model_request, "google", model_name, "success",
+                    int((time.monotonic() - attempt_started) * 1000), "", str(message.chat_id))
+                return parsed_result
+            await asyncio.to_thread(log_model_request, "google", model_name, "empty_response",
+                int((time.monotonic() - attempt_started) * 1000), "empty_response", str(message.chat_id))
+            log.error("Gemini returned no parsable content from model %s.", model_name)
+            return None
+        except Exception as exc:
+            error_text = str(exc).lower()
+            retryable = any(token in error_text for token in ("429", "resource_exhausted", "quota", "rate limit", "too many requests"))
+            error_category = "quota_or_rate_limit" if retryable else type(exc).__name__
+            await asyncio.to_thread(log_model_request, "google", model_name, "error",
+                int((time.monotonic() - attempt_started) * 1000), error_category, str(message.chat_id))
+            if model_index + 1 < len(models_to_try) and retryable:
+                log.warning("Primary model %s hit a quota/rate limit; trying configured fallback %s.", model_name, models_to_try[model_index + 1])
+                continue
+            log.exception("Gemini request failed for model %s.", model_name)
+            return None
+    return None
             await wait_for_rpm_slot(model_name)
             allowed = await asyncio.to_thread(reserve_daily_request, model_name)
             if not allowed:
