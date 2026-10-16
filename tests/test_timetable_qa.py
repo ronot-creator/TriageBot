@@ -65,12 +65,13 @@ class TBLStatusOverlayTests(unittest.TestCase):
    def execute(self,sql,args=()):
     if "FROM translation_aliases" in sql:return Result([])
     if "FROM activity_changes" in sql:return Result(changes)
-    raise AssertionError("TBL query should short-circuit timetable fallback: "+sql)
+    if "FROM timetable_events" in sql:return Result([])
+    raise AssertionError("Unexpected query: "+sql)
   return DB()
  def test_missing_tbl_record_is_unknown_not_absent(self):
   answer=answer_timetable_question(self._db([]),"Is there a TBL for group 6?")
-  self.assertIn("لا توجد لديّ معلومة مؤكدة",answer)
-  self.assertIn("وجود أو عدم وجود",answer)
+  self.assertIn("لم يظهر نشاط مطابق في الجدول المستورد",answer)
+  self.assertIn("لم يتم تسجيل تحديث من القيادة",answer)
  def test_confirmed_tbl_uses_leader_record(self):
   answer=answer_timetable_question(self._db([
    ("TBL group 6","confirmed",None,None,"Confirmed by leaders","GD","2026-10-16")
