@@ -40,13 +40,19 @@ def load_aliases(db:Any)->list[dict[str,str]]:
 
 def resolve_intent(text:str,aliases:list[dict[str,str]],today:date|None=None)->dict[str,Any]:
     n=normalize_text(text)
-    intent={"exam":any(normalize_text(t) in n for t in EXAM_TERMS),"subject":None,"activity":None,"non_lecture":False,"room":None,"group":None,"date":None,"weekday":None,"next":False}
+    intent={"exam":any(normalize_text(t) in n for t in EXAM_TERMS),"subject":None,"activity":None,"non_lecture":False,"room":None,"group":None,"date":None,"date_start":None,"date_end":None,"weekday":None,"next":False}
     today=today or datetime.now(CAIRO).date()
-    if any(t in n for t in ("today","النهارده","انهارده")):
+    from datetime import timedelta
+    if any(t in n for t in ("day after tomorrow","بعد بكرة","بعد بكرا","بعد غد")):
+        intent["date"]=(today+timedelta(days=2)).isoformat()
+    elif any(t in n for t in ("today","النهارده","انهارده","النهاردة")):
         intent["date"]=today.isoformat()
-    elif any(t in n for t in ("tomorrow","بكره","بكرة")):
-        from datetime import timedelta
+    elif any(t in n for t in ("tomorrow","بكره","بكرة","بكرا")):
         intent["date"]=(today+timedelta(days=1)).isoformat()
+    if any(t in n for t in ("next week","الأسبوع القادم","الاسبوع القادم","الأسبوع الجاي","الاسبوع الجاي","الاسبوع اللي جاي")):
+        next_monday=today+timedelta(days=7-today.weekday())
+        intent["date_start"]=next_monday.isoformat()
+        intent["date_end"]=(next_monday+timedelta(days=6)).isoformat()
     intent["next"]=any(t in n for t in ("next","upcoming","الجاية","القادم","القادمة"))
     for item in sorted(aliases,key=lambda a:len(normalize_text(a["alias"])),reverse=True):
         if not _contains_alias(n,item["alias"]):continue
@@ -130,7 +136,13 @@ def answer_timetable_question(db:Any,text:str,term_start:str="",term_end:str="")
             if term_bounds:
                 sql+=" AND event_date>=? AND event_date<=?"
                 args.extend(term_bounds)
-            if intent["date"]:sql+=" AND event_date=?";args.append(intent["date"])
+            if intent["date_start"] and intent["date_end"]:
+                sql+=" AND event_date>=? AND event_date<=?"
+                args.extend((intent["date_start"],intent["date_end"]))
+            if intent["date_start"] and intent["date_end"]:
+            sql+=" AND event_date>=? AND event_date<=?"
+            args.extend((intent["date_start"],intent["date_end"]))
+        if intent["date"]:sql+=" AND event_date=?";args.append(intent["date"])
             if intent["subject"]:sql+=" AND lower(subject)=lower(?)";args.append(intent["subject"])
             if intent["next"]:sql+=" AND event_date>=?";args.append(datetime.now(CAIRO).date().isoformat())
             sql+=" ORDER BY event_date LIMIT 30"; rows=db.execute(sql,tuple(args)).rows
@@ -155,7 +167,7 @@ def answer_timetable_question(db:Any,text:str,term_start:str="",term_end:str="")
         sql+=" ORDER BY event_date,start_time LIMIT 100"; rows=db.execute(sql,tuple(args)).rows
         if intent["group"] is not None:rows=[r for r in rows if intent["group"] in _groups_from_text(r[6])]
         if not rows:return "لم أجد نشاطاً مطابقاً في جدول السنة الأولى المستورد. قد تكون البيانات ناقصة أو تحتاج صياغة السؤال بشكل أوضح."
-        if not any((intent["subject"],intent["activity"],intent["non_lecture"],intent["room"],intent["group"] is not None,intent["date"],intent["weekday"],intent["next"])):rows=rows[:10]
+        if not any((intent["subject"],intent["activity"],intent["non_lecture"],intent["room"],intent["group"] is not None,intent["date"],intent["date_start"],intent["weekday"],intent["next"])):rows=rows[:10]
         lines=["الجدول المستورد للسنة الأولى:"]
         for r in rows[:20]:
             extra=[]
