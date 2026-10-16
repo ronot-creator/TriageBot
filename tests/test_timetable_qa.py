@@ -72,6 +72,20 @@ class TBLStatusOverlayTests(unittest.TestCase):
   answer=answer_timetable_question(self._db([]),"Is there a TBL for group 6?")
   self.assertIn("لم يظهر نشاط مطابق في الجدول المستورد",answer)
   self.assertIn("لم يتم تسجيل تحديث من القيادة",answer)
+ def test_imported_tbl_baseline_is_used_without_leader_override(self):
+  class Result:
+   def __init__(self,rows):self.rows=rows
+  class DB:
+   def execute(self,sql,args=()):
+    if "FROM translation_aliases" in sql:return Result([])
+    if "FROM activity_changes" in sql:return Result([])
+    if "FROM timetable_events" in sql:return Result([("TBL","Group 6","2026-10-20","Tuesday","Imported workbook")])
+    raise AssertionError("Unexpected query: "+sql)
+  answer=answer_timetable_question(DB(),"Is there a TBL for group 6?")
+  self.assertIn("يوجد TBL مدرج للمجموعة 6",answer)
+  self.assertIn("2026-10-20",answer)
+  self.assertIn("Imported workbook",answer)
+
  def test_confirmed_tbl_uses_leader_record(self):
   answer=answer_timetable_question(self._db([
    ("TBL group 6","confirmed",None,None,"Confirmed by leaders","GD","2026-10-16")
