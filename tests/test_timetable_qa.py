@@ -50,4 +50,6 @@ class TimetableCountTests(unittest.TestCase):
  def test_missing_group_asks_for_clarification(self):
   answer=answer_timetable_question(FakeDB(),"How many group discussions do we have?")
   self.assertIn("أي مجموعة",answer)
-\nif __name__=="__main__":unittest.main()
+
+if __name__=="__main__":
+ unittest.main()
