@@ -90,23 +90,16 @@ def _groups_from_text(value:Any)->set[int]:
 def _time(value:Any)->str:
     raw=str(value or "").strip();return raw[:5] if raw else "time not specified"
 
-def answer_timetable_question(db:Any,text:str,term_start:str="",term_end:str="")->str|None:
+def answer_timetable_question(db:Any,text:str,current_term:str="term1")->str|None:
     if not looks_like_schedule_question(text):return None
     try:
         aliases=load_aliases(db); intent=resolve_intent(text,aliases)
         normalized=normalize_text(text)
-        term_bounds = None
-        if term_start and term_end:
-            try:
-                parsed_start = date.fromisoformat(term_start)
-                parsed_end = date.fromisoformat(term_end)
-                if parsed_end >= parsed_start:
-                    term_bounds = (parsed_start.isoformat(), parsed_end.isoformat())
-            except ValueError:
-                term_bounds = None
-        asks_for_term = any(term in normalized for term in ("this semester", "this term", "current semester", "current term", "الفصل الحالي", "الترم الحالي", "الترم ده", "الفصل ده"))
-        if asks_for_term and term_bounds is None:
-            return "حدود الفصل الدراسي الحالي مش متسجلة بشكل موثوق. خلي مسؤول البوت يضبطها أولاً، عشان ما أخلطش مواعيد فصول مختلفة."
+        asks_for_second_term = any(term in normalized for term in ("second semester", "second term", "term 2", "term2", "الفصل الثاني", "الترم الثاني", "الترم التاني"))
+        if asks_for_second_term:
+            return "المتاح عندي حالياً بيانات الفصل الأول فقط (term1)، لذلك لا أقدر أؤكد مواعيد الفصل الثاني من غير بياناته."
+        if current_term != "term1":
+            return "قاعدة البيانات الحالية تحتوي على بيانات الفصل الأول فقط (term1)."
         count_intent=bool(re.search(r"\b(how many|count|number of|كم|كام|عدد)\b",normalized))
         gd_terms=("group discussion","group discussions","discussion group","gd","مناقشة جماعية","مناقشات جماعية","جروب ديسكشن","ديسكشن")
         is_gd_count=count_intent and any(term in normalized for term in gd_terms)
@@ -120,9 +113,6 @@ def answer_timetable_question(db:Any,text:str,term_start:str="",term_end:str="")
                 return "أقدر أحسبها من الجدول، لكن أحتاج رقم المجموعة أولاً. تقصد أي مجموعة؟"
             sql="SELECT activity_type,groups_text,event_date FROM timetable_events WHERE year_level=?"
             args=["First year"]
-            if term_bounds:
-                sql+=" AND event_date>=? AND event_date<=?"
-                args.extend(term_bounds)
             if intent["date_start"] and intent["date_end"]:
                 sql+=" AND event_date>=? AND event_date<=?"
                 args.extend((intent["date_start"],intent["date_end"]))
@@ -137,17 +127,12 @@ def answer_timetable_question(db:Any,text:str,term_start:str="",term_end:str="")
                 period=f"خلال الفترة من {intent['date_start']} إلى {intent['date_end']}"
             elif intent["date"]:
                 period=f"في تاريخ {intent['date']}"
-            elif term_bounds:
-                period=f"خلال الفصل المحدد من {term_bounds[0]} إلى {term_bounds[1]}"
             else:
-                period="ضمن كل التواريخ الموجودة في ملف السنة الأولى المستورد"
+                period="ضمن بيانات الفصل الأول الموجودة في ملف السنة الأولى المستورد"
             return f"حسب الجدول المستورد، للمجموعة {group} عدد {len(matching)} من جلسات Group Discussion (GD) {period}."
         if intent["exam"]:
             sql="SELECT event_date,day,assessment_type,subject,activity_component,source_text,review_note FROM exam_events WHERE year_level=?"
             args:list[Any]=["First year"]
-            if term_bounds:
-                sql+=" AND event_date>=? AND event_date<=?"
-                args.extend(term_bounds)
             if intent["date_start"] and intent["date_end"]:
                 sql+=" AND event_date>=? AND event_date<=?"
                 args.extend((intent["date_start"],intent["date_end"]))
@@ -163,9 +148,6 @@ def answer_timetable_question(db:Any,text:str,term_start:str="",term_end:str="")
             return "\n".join(lines)[:3800]
         sql="""SELECT event_date,day,start_time,end_time,subject,activity_type,groups_text,room_text,group_room_association,review_note,source_page FROM timetable_events WHERE year_level=?"""
         args=["First year"]
-        if term_bounds:
-            sql+=" AND event_date>=? AND event_date<=?"
-            args.extend(term_bounds)
         if intent["date_start"] and intent["date_end"]:
             sql+=" AND event_date>=? AND event_date<=?"
             args.extend((intent["date_start"],intent["date_end"]))
