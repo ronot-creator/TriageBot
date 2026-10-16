@@ -76,6 +76,11 @@ logging.basicConfig(
 )
 log = logging.getLogger("svu-triage")
 
+# HTTP clients can log full request URLs; Telegram Bot API URLs contain the bot token.
+# Keep transport logs at WARNING so credentials are not emitted by routine request logging.
+for _logger_name in ("httpx", "httpcore", "httpcore2", "telegram.request"):
+    logging.getLogger(_logger_name).setLevel(logging.WARNING)
+
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 TURSO_URL = os.getenv("TURSO_DATABASE_URL", "").strip()
@@ -241,6 +246,24 @@ def init_db() -> None:
             processed_at TEXT NOT NULL,
             PRIMARY KEY(chat_id, message_id)
         )""",
+        """CREATE TABLE IF NOT EXISTS activity_changes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            activity_key TEXT NOT NULL,
+            activity_type TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'unknown',
+            effective_start TEXT,
+            effective_end TEXT,
+            details TEXT NOT NULL DEFAULT '',
+            related_activity TEXT NOT NULL DEFAULT '',
+            source_chat_id INTEGER,
+            source_message_id INTEGER,
+            created_by INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_by INTEGER NOT NULL,
+            updated_at TEXT NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_activity_changes_key_active ON activity_changes(activity_key, active)",
     ]
     for statement in statements:
         _exec(statement)
@@ -848,7 +871,10 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     # Timetable facts are retrieved deterministically from Turso before triage.
     # Never ask Gemini to invent schedule facts or generate SQL.
     if schedule_question:
-        timetable_answer = await asyncio.to_thread(answer_timetable_question, db, raw_text)
+        timetable_answer = await asyncio.to_thread(
+            answer_timetable_question, db, raw_text,
+            get_config("current_term_start"), get_config("current_term_end")
+        )
         if timetable_answer:
             try:
                 sent_reply = await message.reply_text(timetable_answer, disable_web_page_preview=True)
@@ -1355,6 +1381,35 @@ async def setleaders_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "للتأكد من صلاحيات الأعضاء، أضف البوت للجروب واجعله مشرفاً بصلاحيات محدودة."
     )
 
+async def setterm_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Set the current term boundary in Turso (not environment variables)."""
+    message = update.effective_message
+    if not update.effective_user or update.effective_user.id != OWNER_ID:
+        await message.reply_text("الأمر ده متاح لمالك البوت فقط.")
+        return
+    if len(context.args) != 2:
+        await message.reply_text(
+            "استخدم: /setterm YYYY-MM-DD YYYY-MM-DD\n"
+            "مثال: /setterm 2026-09-01 2027-01-15\n"
+            "اكتب تاريخ بداية ونهاية الفصل الأول حسب التقويم الرسمي."
+        )
+        return
+    try:
+        start = datetime.strptime(context.args[0], "%Y-%m-%d").date()
+        end = datetime.strptime(context.args[1], "%Y-%m-%d").date()
+        if end < start:
+            raise ValueError("end before start")
+    except ValueError:
+        await message.reply_text("التواريخ لازم تكون صحيحة وبصيغة YYYY-MM-DD، والنهاية بعد البداية.")
+        return
+    set_config("current_term_start", start.isoformat())
+    set_config("current_term_end", end.isoformat())
+    await message.reply_text(
+        f"تم حفظ حدود الفصل الحالي في Turso: {start.isoformat()} إلى {end.isoformat()}. "
+        "سيستخدمها البوت عند تصفية مواعيد الأنشطة."
+    )
+
+
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await require_leader(update, context):
         return
@@ -1600,6 +1655,7 @@ def main() -> None:
     app.add_handler(CommandHandler("chatid", chatid_command))
     app.add_handler(CommandHandler("setleaders", setleaders_command))
     app.add_handler(CommandHandler("status", status_command))
+    app.add_handler(CommandHandler("setterm", setterm_command))
     app.add_handler(CommandHandler("addword", addword_command))
     app.add_handler(CommandHandler("delword", delword_command))
     app.add_handler(CommandHandler("listwords", listwords_command))
