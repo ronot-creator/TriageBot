@@ -57,6 +57,7 @@ from college_data import (
     announcements_for_context, announcement_by_id,
 )
 from timetable_qa import answer_timetable_question, looks_like_schedule_question
+from import_timetable import import_workbook
 
 from telegram.ext import (
     Application,
@@ -1503,6 +1504,15 @@ def main() -> None:
     global BOT_USERNAME, DB_READY, BOT_READY
     start_health_server()
     init_db()
+    workbook_path = os.getenv("TIMETABLE_WORKBOOK_PATH", "assets/Medical_Timetable_FirstYear_Complete.xlsx").strip()
+    if os.path.isfile(workbook_path):
+        try:
+            import_workbook(workbook_path)
+        except Exception as exc:
+            log.exception("Timetable workbook import failed; refusing to start with a partial timetable.")
+            raise RuntimeError("Timetable workbook import failed. Check Render logs and workbook/database settings.") from exc
+    else:
+        log.warning("First-year workbook not found at %s; timetable Q&A will remain unavailable until it is uploaded.", workbook_path)
     DB_READY = True
 
     async def post_init(application: Application) -> None:
