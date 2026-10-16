@@ -1473,10 +1473,15 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not await require_leader(update, context):
         return
     leader_id = get_leader_chat_id()
-    day = datetime.now(timezone.utc).date().isoformat()
+    day = datetime.now(QENA_TZ).date().isoformat()
     try:
         usage_rows = _exec("SELECT model_name,requests FROM model_usage WHERE usage_date=?", (day,)).rows
         usage = {str(row[0]): int(row[1]) for row in usage_rows}
+        attempt_rows = _exec(
+            "SELECT provider,model_name,outcome,COUNT(*) FROM model_request_log WHERE usage_date=? GROUP BY provider,model_name,outcome ORDER BY provider,model_name,outcome",
+            (day,),
+        ).rows
+        attempt_summary = "; ".join(f"{row[0]}/{row[1]} {row[2]}={row[3]}" for row in attempt_rows) or "لا توجد محاولات مسجلة اليوم"
         keyword_count = len(get_active_keywords())
         faq_count = len(get_faqs())
         await update.effective_message.reply_text(
@@ -1485,6 +1490,8 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             f"النموذج الأساسي: {MODEL_NAME}\n"
             f"استخدام اليوم: 3.5 Flash-Lite {usage.get('gemini-3.5-flash-lite', 0)}/{RPD_LIMIT}; 3.1 Flash-Lite {usage.get('gemini-3.1-flash-lite', 0)}/{RPD_LIMIT}\n"
             f"حد الدقيقة لكل نموذج: {RPM_LIMIT} طلب/دقيقة\n"
+            f"نتائج المحاولات: {attempt_summary}\n"
+            f"التاريخ المحلي (قنا): {day}\n"
             f"الكلمات النشطة: {keyword_count}\n"
             f"الأسئلة الشائعة النشطة: {faq_count}\n"
             f"الرد التلقائي من FAQ: {'مفعّل' if AUTO_FAQ_REPLY else 'متوقف'}"
