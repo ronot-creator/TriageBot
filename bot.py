@@ -1240,7 +1240,7 @@ async def timetable_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
         "أهلاً بك في SVU Med Triage Bot. أقدر أساعدك في معلومات الجدول والإعلانات والأسئلة الشائعة، "
-        "وأحوّل المسائل التي تحتاج تأكيداً إلى مراجعة بشرية.\\n\\n"
+        "وأحوّل المسائل التي تحتاج تأكيداً إلى مراجعة بشرية.\n\n"
         "استخدم /help لمعرفة طريقة الاستخدام، أو /morehelp لإرسال استفسار خاص لمسؤول البوت."
     )
 
@@ -1248,21 +1248,21 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     owner_label = f"@{OWNER_USERNAME}" if OWNER_USERNAME else "مسؤول البوت"
     await update.effective_message.reply_text(
-        "📚 مساعدة SVU Med Triage Bot\\n\\n"
-        "ما الذي أستطيع فعله؟\\n"
-        "• أساعد في الأسئلة الشائعة المعتمدة.\\n"
-        "• أجيب عن أسئلة جدول وامتحانات السنة الأولى عندما تكون المعلومة موجودة في البيانات المحفوظة.\\n"
-        "• أراجع الرسائل الجامعية التي تحتاج متابعة، وقد أحيلها إلى المسؤولين للمراجعة.\\n"
-        "• أتعامل مع الإعلانات المحفوظة عند توفر مصدر مناسب.\\n\\n"
-        "كيف تستخدم البوت؟\\n"
-        "• اكتب سؤالك بوضوح، واذكر المجموعة أو التاريخ أو المادة عند السؤال عن الجدول.\\n"
-        "• استخدم /timetable متبوعاً بكلمات البحث للبحث في السجلات المتاحة.\\n"
-        "• إذا لم أجد معلومة مؤكدة، فقد أطلب مراجعة بشرية بدلاً من التخمين.\\n"
-        "• البوت ليس بديلاً عن الطبيب أو عن إعلان رسمي؛ تأكد من المواعيد المهمة من المصدر الرسمي.\\n\\n"
-        "الأوامر المتاحة للطلاب:\\n"
-        "/start — بدء الاستخدام\\n"
-        "/help — عرض هذه المساعدة\\n"
-        "/morehelp — إرسال استفسار خاص إلى " + owner_label + "\\n\\n"
+        "📚 مساعدة SVU Med Triage Bot\n\n"
+        "ما الذي أستطيع فعله؟\n"
+        "• أساعد في الأسئلة الشائعة المعتمدة.\n"
+        "• أجيب عن أسئلة جدول وامتحانات السنة الأولى عندما تكون المعلومة موجودة في البيانات المحفوظة.\n"
+        "• أراجع الرسائل الجامعية التي تحتاج متابعة، وقد أحيلها إلى المسؤولين للمراجعة.\n"
+        "• أتعامل مع الإعلانات المحفوظة عند توفر مصدر مناسب.\n\n"
+        "كيف تستخدم البوت؟\n"
+        "• اكتب سؤالك بوضوح، واذكر المجموعة أو التاريخ أو المادة عند السؤال عن الجدول.\n"
+        "• استخدم /timetable متبوعاً بكلمات البحث للبحث في السجلات المتاحة.\n"
+        "• إذا لم أجد معلومة مؤكدة، فقد أطلب مراجعة بشرية بدلاً من التخمين.\n"
+        "• البوت ليس بديلاً عن الطبيب أو عن إعلان رسمي؛ تأكد من المواعيد المهمة من المصدر الرسمي.\n\n"
+        "الأوامر المتاحة للطلاب:\n"
+        "/start — بدء الاستخدام\n"
+        "/help — عرض هذه المساعدة\n"
+        "/morehelp — إرسال استفسار خاص إلى " + owner_label + "\n\n"
         "لإرسال استفسار خاص، افتح المحادثة الخاصة مع البوت ثم أرسل /morehelp واتبع التعليمات. "
         "رسالتك ستصل إلى مسؤول البوت للمراجعة، لكن الرد ليس فورياً أو مضموناً."
     )
@@ -1298,10 +1298,10 @@ async def deliver_more_help(
     username = f"@{user.username}" if user.username else "لا يوجد اسم مستخدم"
     owner_username = f" (@{OWNER_USERNAME})" if OWNER_USERNAME else ""
     payload = (
-        "📩 استفسار جديد عبر /morehelp\\n"
-        f"من: {user.full_name} ({username})\\n"
-        f"معرّف الرسالة: {message.message_id}\\n\\n"
-        f"الاستفسار:\\n{query_text[:6000]}"
+        "📩 استفسار جديد عبر /morehelp\n"
+        f"من: {user.full_name} ({username})\n"
+        f"معرّف الرسالة: {message.message_id}\n\n"
+        f"الاستفسار:\n{query_text[:6000]}"
     )
     try:
         await context.bot.send_message(chat_id=OWNER_ID, text=payload)
@@ -1366,11 +1366,11 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         keyword_count = len(get_active_keywords())
         faq_count = len(get_faqs())
         await update.effective_message.reply_text(
-            f"حالة البوت:\\n"
-            f"جروب القيادة: {leader_id or 'غير مضبوط'}\\n"
-            f"النموذج الأساسي: {MODEL_NAME}\\n"
-            f"استخدام اليوم: 3.5 Flash-Lite {usage.get('gemini-3.5-flash-lite', 0)}/{RPD_LIMIT}; 3.1 Flash-Lite {usage.get('gemini-3.1-flash-lite', 0)}/{RPD_LIMIT}\\n"
-            f"حد الدقيقة لكل نموذج: {RPM_LIMIT} طلب/دقيقة\\n"
+            f"حالة البوت:\n"
+            f"جروب القيادة: {leader_id or 'غير مضبوط'}\n"
+            f"النموذج الأساسي: {MODEL_NAME}\n"
+            f"استخدام اليوم: 3.5 Flash-Lite {usage.get('gemini-3.5-flash-lite', 0)}/{RPD_LIMIT}; 3.1 Flash-Lite {usage.get('gemini-3.1-flash-lite', 0)}/{RPD_LIMIT}\n"
+            f"حد الدقيقة لكل نموذج: {RPM_LIMIT} طلب/دقيقة\n"
             f"الكلمات النشطة: {keyword_count}\n"
             f"الأسئلة الشائعة النشطة: {faq_count}\n"
             f"الرد التلقائي من FAQ: {'مفعّل' if AUTO_FAQ_REPLY else 'متوقف'}"
