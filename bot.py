@@ -56,6 +56,7 @@ from college_data import (
     cancel_timetable_import, list_timetable, save_announcement, pending_announcements,
     announcements_for_context, announcement_by_id,
 )
+from timetable_qa import answer_timetable_question, looks_like_schedule_question
 
 from telegram.ext import (
     Application,
@@ -816,7 +817,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
 
     keywords = await asyncio.to_thread(get_active_keywords)
     keyword = matched_keyword(raw_text, keywords) if raw_text else None
-    schedule_question = await asyncio.to_thread(looks_like_college_schedule_question, raw_text) if raw_text else False
+    schedule_question = looks_like_schedule_question(raw_text) if raw_text else False
     triggered = mentioned or replied_to_bot or bool(keyword) or schedule_question
     if not triggered:
         return
@@ -833,6 +834,20 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
         # AI calls. The next Telegram retry can be processed after DB recovery.
         log.exception("Deduplication storage failed; skipping this message safely.")
         return
+
+    # Timetable facts are retrieved deterministically from Turso before triage.
+    # Never ask Gemini to invent schedule facts or generate SQL.
+    if schedule_question:
+        timetable_answer = await asyncio.to_thread(answer_timetable_question, db, raw_text)
+        if timetable_answer:
+            try:
+                sent_reply = await message.reply_text(timetable_answer, disable_web_page_preview=True)
+                await asyncio.to_thread(
+                    persist_assistant_message, message.chat_id, sent_reply.message_id, timetable_answer
+                )
+            except TelegramError:
+                log.exception("Could not send timetable answer.")
+            return
 
     hint, cleaned = urgency_hint_and_clean_text(raw_text)
     # Keep original text intact in the prompt and ticket. Cleaned text is only a readable supplement.
