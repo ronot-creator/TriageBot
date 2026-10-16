@@ -195,7 +195,7 @@ def answer_timetable_question(db:Any,text:str,current_term:str="term1")->str|Non
                     for activity, groups_text, event_date, day, source_text in scheduled[:10]:
                         lines.append(f"• {event_date or 'التاريخ غير محدد'} ({day or 'اليوم غير محدد'}) — {activity}")
                     lines.append("لم أجد تحديثاً أحدث من القيادة يغيّر هذه البيانات.")
-                    return "\\n".join(lines)[:1800]
+                    return "\n".join(lines)[:1800]
                 return f"لا توجد لديّ معلومة مؤكدة عن وجود أو عدم وجود TBL للمجموعة {group} في البيانات الحالية. لم يظهر نشاط مطابق في الجدول المستورد ولم يتم تسجيل تحديث من القيادة."
             latest = matching_changes[0]
             _, status, start, end, details, related, created = latest
