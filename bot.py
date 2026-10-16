@@ -100,6 +100,7 @@ ALLOW_LOCAL_DB = os.getenv("ALLOW_LOCAL_DB", "0").lower() in {"1", "true", "yes"
 NEWS_CHANNEL_ID_RAW = os.getenv("NEWS_CHANNEL_ID", "").strip()
 DISCUSSION_GROUP_ID_RAW = os.getenv("DISCUSSION_GROUP_ID", "").strip()
 LEADER_IDS_RAW = os.getenv("LEADER_TELEGRAM_IDS", "").strip()
+OWNER_USERNAME = os.getenv("OWNER_USERNAME", "").strip().lstrip("@")
 NEWS_CHANNEL_ID = int(NEWS_CHANNEL_ID_RAW) if NEWS_CHANNEL_ID_RAW.lstrip("-").isdigit() else None
 DISCUSSION_GROUP_ID = int(DISCUSSION_GROUP_ID_RAW) if DISCUSSION_GROUP_ID_RAW.lstrip("-").isdigit() else None
 LEADER_IDS = {int(value.strip()) for value in LEADER_IDS_RAW.split(",") if value.strip().isdigit()}
@@ -1238,28 +1239,97 @@ async def timetable_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
-        "أنا بوت فرز رسائل الجروب. راقب الكلمات محلياً، وأستخدم Gemini فقط عند المنشن أو كلمة مفتاحية أو الرد عليّ.\n"
-        "للمساعدة في الأوامر: /help"
+        "أهلاً بك في SVU Med Triage Bot. أقدر أساعدك في معلومات الجدول والإعلانات والأسئلة الشائعة، "
+        "وأحوّل المسائل التي تحتاج تأكيداً إلى مراجعة بشرية.\n\n"
+        "استخدم /help لمعرفة طريقة الاستخدام، أو /morehelp لإرسال استفسار خاص لمسؤول البوت."
     )
 
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    owner_label = f"@{OWNER_USERNAME}" if OWNER_USERNAME else "مسؤول البوت"
     await update.effective_message.reply_text(
-        "أوامر القيادة (داخل جروب القيادة أو بواسطة المالك):\n"
-        "/chatid — عرض الرقم الداخلي للجروب الحالي (للمالك فقط)\n"
-        "/setleaders — ربط الجروب الحالي كجروب قيادة (للمالك فقط)\n"
-        "/status — حالة الإعدادات والاستخدام\n"
-        "/addword كلمة | /delword كلمة | /listwords\n"
-        "/addfaq السؤال | الإجابة | الكلمات الاختيارية\n"
-        "/listfaqs | /delfaq رقم\n"
-        "/reviewold — عرض الأسئلة الشائعة التي لم تُراجع منذ 90 يوماً\n"
-        "/archivefaq رقم — أرشفة FAQ يدوياً\n"
-        "/timetable [بحث] — البحث في الجدول المحفوظ\n"
-        "/timetablechange ID | field=value | reason=... — تعديل سجل مع حفظ سجل تدقيق\n"
-        "/pendingannouncements — مسودات الإعلانات\n"
-        "/approveannouncement ID | /editannouncement ID | نص | /rejectannouncement ID\n\n"
-        "تلميح الأولوية يمكن كتابته في أي مكان: urgent / medium / low أو عاجل / متوسط / منخفض.\n"
-        "ملاحظة: القائمة السوداء تمنع البوت من معالجة رسائل المستخدم فقط؛ لا تطرده من تيليجرام."
+        "📚 مساعدة SVU Med Triage Bot\n\n"
+        "ما الذي أستطيع فعله؟\n"
+        "• أساعد في الأسئلة الشائعة المعتمدة.\n"
+        "• أجيب عن أسئلة جدول وامتحانات السنة الأولى عندما تكون المعلومة موجودة في البيانات المحفوظة.\n"
+        "• أراجع الرسائل الجامعية التي تحتاج متابعة، وقد أحيلها إلى المسؤولين للمراجعة.\n"
+        "• أتعامل مع الإعلانات المحفوظة عند توفر مصدر مناسب.\n\n"
+        "كيف تستخدم البوت؟\n"
+        "• اكتب سؤالك بوضوح، واذكر المجموعة أو التاريخ أو المادة عند السؤال عن الجدول.\n"
+        "• استخدم /timetable متبوعاً بكلمات البحث للبحث في السجلات المتاحة.\n"
+        "• إذا لم أجد معلومة مؤكدة، فقد أطلب مراجعة بشرية بدلاً من التخمين.\n"
+        "• البوت ليس بديلاً عن الطبيب أو عن إعلان رسمي؛ تأكد من المواعيد المهمة من المصدر الرسمي.\n\n"
+        "الأوامر المتاحة للطلاب:\n"
+        "/start — بدء الاستخدام\n"
+        "/help — عرض هذه المساعدة\n"
+        "/morehelp — إرسال استفسار خاص إلى " + owner_label + "\n\n"
+        "لإرسال استفسار خاص، افتح المحادثة الخاصة مع البوت ثم أرسل /morehelp واتبع التعليمات. "
+        "رسالتك ستصل إلى مسؤول البوت للمراجعة، لكن الرد ليس فورياً أو مضموناً."
     )
+
+
+async def morehelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    if not message or not update.effective_user:
+        return
+    if update.effective_chat.type != ChatType.PRIVATE:
+        await message.reply_text(
+            "لحماية خصوصيتك، افتح المحادثة الخاصة مع البوت ثم أرسل /morehelp هناك."
+        )
+        return
+    query_text = " ".join(context.args).strip()
+    if not query_text:
+        context.user_data["awaiting_more_help"] = True
+        await message.reply_text(
+            "اكتب استفسارك في الرسالة التالية، وسأرسله إلى مسؤول البوت. "
+            "لا ترسل كلمات مرور أو معلومات شخصية حساسة."
+        )
+        return
+    await deliver_more_help(update, context, query_text)
+
+
+async def deliver_more_help(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, query_text: str
+) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    username = f"@{user.username}" if user.username else "لا يوجد اسم مستخدم"
+    owner_username = f" (@{OWNER_USERNAME})" if OWNER_USERNAME else ""
+    payload = (
+        "📩 استفسار جديد عبر /morehelp\n"
+        f"من: {user.full_name} ({username})\n"
+        f"معرّف الرسالة: {message.message_id}\n\n"
+        f"الاستفسار:\n{query_text[:6000]}"
+    )
+    try:
+        await context.bot.send_message(chat_id=OWNER_ID, text=payload)
+        context.user_data.pop("awaiting_more_help", None)
+        await message.reply_text(
+            f"تم إرسال استفسارك إلى مسؤول البوت{owner_username}. "
+            "قد لا يصلك رد فوري."
+        )
+    except TelegramError:
+        log.warning("Could not deliver /morehelp message to the configured owner chat.")
+        await message.reply_text(
+            "تعذر إرسال الاستفسار حالياً. حاول لاحقاً أو تواصل مع مسؤول البوت عبر القناة الرسمية."
+        )
+
+
+async def morehelp_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    if (
+        not message
+        or not update.effective_user
+        or update.effective_chat.type != ChatType.PRIVATE
+        or not context.user_data.get("awaiting_more_help")
+        or not message_text(message)
+        or message_text(message).startswith("/")
+    ):
+        return
+    await deliver_more_help(update, context, message_text(message))
+
 
 async def chatid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or update.effective_user.id != OWNER_ID:
@@ -1296,11 +1366,11 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         keyword_count = len(get_active_keywords())
         faq_count = len(get_faqs())
         await update.effective_message.reply_text(
-            f"حالة البوت:\\n"
-            f"جروب القيادة: {leader_id or 'غير مضبوط'}\\n"
-            f"النموذج الأساسي: {MODEL_NAME}\\n"
-            f"استخدام اليوم: 3.5 Flash-Lite {usage.get('gemini-3.5-flash-lite', 0)}/{RPD_LIMIT}; 3.1 Flash-Lite {usage.get('gemini-3.1-flash-lite', 0)}/{RPD_LIMIT}\\n"
-            f"حد الدقيقة لكل نموذج: {RPM_LIMIT} طلب/دقيقة\\n"
+            f"حالة البوت:\n"
+            f"جروب القيادة: {leader_id or 'غير مضبوط'}\n"
+            f"النموذج الأساسي: {MODEL_NAME}\n"
+            f"استخدام اليوم: 3.5 Flash-Lite {usage.get('gemini-3.5-flash-lite', 0)}/{RPD_LIMIT}; 3.1 Flash-Lite {usage.get('gemini-3.1-flash-lite', 0)}/{RPD_LIMIT}\n"
+            f"حد الدقيقة لكل نموذج: {RPM_LIMIT} طلب/دقيقة\n"
             f"الكلمات النشطة: {keyword_count}\n"
             f"الأسئلة الشائعة النشطة: {faq_count}\n"
             f"الرد التلقائي من FAQ: {'مفعّل' if AUTO_FAQ_REPLY else 'متوقف'}"
@@ -1525,6 +1595,8 @@ def main() -> None:
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("morehelp", morehelp_command))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, morehelp_message_handler), group=-1)
     app.add_handler(CommandHandler("chatid", chatid_command))
     app.add_handler(CommandHandler("setleaders", setleaders_command))
     app.add_handler(CommandHandler("status", status_command))
