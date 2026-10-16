@@ -1405,7 +1405,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         f"للدعم الخاص: افتح محادثة البوت الخاصة ثم استخدم /morehelp. المسؤول: {owner_label}.",
         "الرد على الاستفسارات الخاصة قد لا يكون فورياً.",
     ])
-    await message.reply_text("\\n".join(sections))
+    await message.reply_text("\n".join(sections))
 
 async def morehelp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
