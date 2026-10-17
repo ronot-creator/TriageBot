@@ -165,9 +165,12 @@ AI_RATE_LOCK = asyncio.Lock()
 BOT_USERNAME: Optional[str] = None
 
 DEFAULT_KEYWORDS = [
-    "امتحان", "اتلغى", "ميدترم", "تأجيل", "دكتور", "ضروري",
-    "سقوط", "داتا", "data", "deadline", "جدول الامتحانات",
-    "تغيير الجدول", "تسجيل المواد",
+    # High-signal changes/risks, not generic words like "lecture" that occur in chatter.
+    "امتحان", "اتلغى", "اتلغي", "إلغاء", "الغاء", "ميدترم", "تأجيل", "اتأجل",
+    "تأجل", "تغيير الجدول", "تغيير القاعة", "تأخير", "اتنقل", "اتغير",
+    "cancelled", "canceled", "postponed", "rescheduled", "moved to", "room change",
+    "deadline", "registration", "attendance problem", "urgent", "ضروري",
+    "سقوط", "داتا", "data", "جدول الامتحانات", "تسجيل المواد",
 ]
 
 # ----------------------------- Data model --------------------------------
