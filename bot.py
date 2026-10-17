@@ -1621,7 +1621,7 @@ If evidence directly answers the question, give a concise answer and cite exact 
 For TBL/presence/cancellation status, prefer explicit active activity updates over the imported baseline. Do not claim a cancellation unless the evidence explicitly records it.
 Return JSON matching the schema.
 
-Question from user ID {user_id}:
+Question:
 {question[:6000]}
 
 This user's private conversation context only:
