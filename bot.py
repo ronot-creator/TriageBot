@@ -1633,13 +1633,25 @@ Leader update: {raw}
                 int((time.monotonic() - started) * 1000), "empty_response", str(message.chat_id))
         except Exception as exc:
             err = str(exc).lower()
-            retryable = any(x in err for x in ("429", "resource_exhausted", "quota", "rate limit", "too many requests"))
+            exception_type = type(exc).__name__.lower()
+            retryable = (
+                any(x in err for x in (
+                    "429", "resource_exhausted", "quota", "rate limit", "too many requests",
+                    "500", "502", "503", "504", "unavailable", "deadline", "timeout", "internal",
+                    "validation error", "validationerror", "jsondecodeerror", "expecting value",
+                    "unexpected activity", "invalid json",
+                ))
+                or exception_type in {"validationerror", "jsondecodeerror"}
+            )
             await asyncio.to_thread(log_model_request, "google", model_name, "error",
                 int((time.monotonic() - started) * 1000),
-                "quota_or_rate_limit" if retryable else type(exc).__name__, str(message.chat_id))
-            if not (retryable and model_index + 1 < len(models_to_try)):
-                log.exception("Could not parse authorized activity update.")
-                break
+                "quota_or_transient_failure" if retryable else type(exc).__name__, str(message.chat_id))
+            if retryable and model_index + 1 < len(models_to_try):
+                log.warning("Activity update parsing failed on %s; trying approved fallback %s.",
+                    model_name, models_to_try[model_index + 1])
+                continue
+            log.exception("Could not parse authorized activity update.")
+            break
     if not proposal:
         await message.reply_text("لم أستطع تحليل التحديث بأمان. لم يتم حفظ أي تغيير.")
         return
