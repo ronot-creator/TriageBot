@@ -37,8 +37,7 @@ def looks_like_schedule_question(text:str)->bool:
         )
         timetable_cues = (
             "timetable", "schedule", "lecture", "practical", "exam", "gd", "tbl",
-            "room", "hall", "tomorrow", "today", "next week", "بكره", "بكرة",
-            "بكرا", "النهارده", "جدول", "محاضرة", "عملي", "امتحان", "ديسكشن",
+            "room", "hall", "جدول", "محاضرة", "عملي", "امتحان", "ديسكشن",
         )
         if any(normalize_text(cue) in n for cue in question_cues + timetable_cues):
             return True
