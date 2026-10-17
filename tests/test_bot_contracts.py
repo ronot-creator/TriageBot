@@ -169,5 +169,56 @@ class BotPersistenceAndQuotaTests(unittest.TestCase):
         self.assertIn("'assistant'", insert[0])
 
 
+class LeaderGroupConfigurationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        FAKE_DB.config.clear()
+        BOT.OWNER_ID = 999
+
+    async def test_only_owner_can_set_leader_group(self):
+        replies = []
+
+        async def reply_text(text):
+            replies.append(text)
+
+        update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=123),
+            effective_chat=SimpleNamespace(type="supergroup", id=-100555),
+            effective_message=SimpleNamespace(reply_text=reply_text),
+        )
+        await BOT.setleaders_command(update, SimpleNamespace())
+        self.assertEqual(FAKE_DB.config.get("leader_chat_id"), None)
+        self.assertTrue(any("مالك البوت فقط" in text for text in replies))
+
+    async def test_owner_must_run_setleaders_inside_a_group(self):
+        replies = []
+
+        async def reply_text(text):
+            replies.append(text)
+
+        update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=999),
+            effective_chat=SimpleNamespace(type="private", id=999),
+            effective_message=SimpleNamespace(reply_text=reply_text),
+        )
+        await BOT.setleaders_command(update, SimpleNamespace())
+        self.assertEqual(FAKE_DB.config.get("leader_chat_id"), None)
+        self.assertTrue(any("داخل جروب القيادة" in text for text in replies))
+
+    async def test_owner_sets_leader_group_id_in_persistent_config(self):
+        replies = []
+
+        async def reply_text(text):
+            replies.append(text)
+
+        update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=999),
+            effective_chat=SimpleNamespace(type="supergroup", id=-100555),
+            effective_message=SimpleNamespace(reply_text=reply_text),
+        )
+        await BOT.setleaders_command(update, SimpleNamespace())
+        self.assertEqual(FAKE_DB.config.get("leader_chat_id"), "-100555")
+        self.assertTrue(any("-100555" in text for text in replies))
+
+
 if __name__ == "__main__":
     unittest.main()
