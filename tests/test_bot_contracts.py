@@ -10,7 +10,7 @@ import os
 import sys
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 
 class FakeResult:
@@ -253,11 +253,11 @@ class PrivateQuestionHandlerTests(unittest.IsolatedAsyncioTestCase):
             effective_chat=SimpleNamespace(type="private", id=321),
         )
         context = SimpleNamespace(user_data={}, bot=SimpleNamespace())
-        with patch.object(BOT, "claim_message_for_processing", return_value=True), \\
-             patch.object(BOT, "persist_context_message") as persist_user, \\
-             patch.object(BOT, "make_context", return_value="private history only"), \\
-             patch.object(BOT, "answer_private_question", new_callable=unittest.mock.AsyncMock,
-                          return_value="لا توجد بيانات مؤكدة كافية.") as answer, \\
+        with patch.object(BOT, "claim_message_for_processing", return_value=True), \
+             patch.object(BOT, "persist_context_message") as persist_user, \
+             patch.object(BOT, "make_context", return_value="private history only"), \
+             patch.object(BOT, "answer_private_question", new_callable=AsyncMock,
+                          return_value="لا توجد بيانات مؤكدة كافية.") as answer, \
              patch.object(BOT, "persist_assistant_message") as persist_answer:
             await BOT.morehelp_message_handler(update, context)
         self.assertEqual(replies, ["لا توجد بيانات مؤكدة كافية."])
@@ -286,7 +286,7 @@ class PrivateQuestionHandlerTests(unittest.IsolatedAsyncioTestCase):
             effective_chat=SimpleNamespace(type="private", id=321),
         )
         context = SimpleNamespace(user_data={"awaiting_more_help": True}, bot=SimpleNamespace(send_message=send_message))
-        with patch.object(BOT, "answer_private_question", new_callable=unittest.mock.AsyncMock) as answer:
+        with patch.object(BOT, "answer_private_question", new_callable=AsyncMock) as answer:
             await BOT.morehelp_message_handler(update, context)
         answer.assert_not_awaited()
         self.assertNotIn("awaiting_more_help", context.user_data)
