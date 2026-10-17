@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from typing import Any
 
 CAIRO=ZoneInfo("Africa/Cairo")
-SCHEDULE_TERMS=("timetable","schedule","lecture","practical","section","gd","tbl","pg","group","room","hall","when is","what do we have","what is on","جدول","محاضرة","محاضرات","عملي","سكشن","سيكشن","جروب","مجموعة","قاعة","مدرج","امتحان","امتحانات","ميدترم","فاينل","امتى","متى","النهارده","انهارده","group discussion","group discussions","discussion group","group discussions","مناقشة جماعية","مناقشات جماعية","جروب ديسكشن","ديسكشن")
+SCHEDULE_TERMS=("timetable","schedule","lecture","practical","section","gd","tbl","pg","room","hall","when is","what do we have","what is on","جدول","محاضرة","محاضرات","عملي","سكشن","سيكشن","قاعة","مدرج","امتحان","امتحانات","ميدترم","فاينل","امتى","متى","النهارده","انهارده","group discussion","group discussions","discussion group","مناقشة جماعية","مناقشات جماعية","جروب ديسكشن","ديسكشن")
 EXAM_TERMS=("exam","exams","midterm","mid term","final","امتحان","امتحانات","ميدترم","فاينل")
 ACTIVITY_CANONICAL={"lecture","practical","gd","tbl","pg"}
 
@@ -24,6 +24,20 @@ def looks_like_schedule_question(text:str)->bool:
             if re.search(r"(?<![a-z0-9])"+re.escape(candidate)+r"(?![a-z0-9])",n):
                 return True
         elif candidate in n:
+            return True
+
+    # Generic mentions of a group are common in ordinary student chat. Do not
+    # route them to timetable Q&A unless there is a group identifier plus a
+    # date/time or timetable cue.
+    group_ref = re.search(r"(?:group|grp|جروب|مجموعة)\\s*#?\\s*\\d{1,2}\\b", n)
+    if group_ref:
+        contextual_cues = (
+            "when", "where", "what", "tomorrow", "today", "next week", "next",
+            "timetable", "schedule", "lecture", "practical", "exam", "gd", "tbl",
+            "room", "hall", "امتى", "متى", "بكره", "بكرة", "بكرا", "النهارده",
+            "جدول", "محاضرة", "عملي", "امتحان", "ديسكشن",
+        )
+        if any(normalize_text(cue) in n for cue in contextual_cues):
             return True
     return False
 
