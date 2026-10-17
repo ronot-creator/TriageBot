@@ -558,10 +558,15 @@ def persist_context_message(message: Message) -> None:
         (message.chat_id, message.chat_id),
     )
 
-def persist_assistant_message(chat_id: int, message_id: int, content: str) -> None:
+def persist_assistant_message(
+    chat_id: int, message_id: int, content: str, user_id: int | None = None
+) -> None:
+    # Associate a bot reply with the student whose message it answers. Context
+    # retrieval is scoped by (chat_id, user_id), so NULL would make replies
+    # invisible to that student's future context.
     db.execute(
-        "INSERT OR IGNORE INTO conversation_messages(chat_id,message_id,user_id,role,content,created_at) VALUES (?,?,NULL,'assistant',?,?)",
-        (chat_id, message_id, content[:4000], utc_now()),
+        "INSERT OR IGNORE INTO conversation_messages(chat_id,message_id,user_id,role,content,created_at) VALUES (?,?,?,'assistant',?,?)",
+        (chat_id, message_id, user_id, content[:4000], utc_now()),
     )
 
 def push_context(message: Message) -> None:
@@ -947,7 +952,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
             try:
                 sent_reply = await message.reply_text(timetable_answer, disable_web_page_preview=True)
                 await asyncio.to_thread(
-                    persist_assistant_message, message.chat_id, sent_reply.message_id, timetable_answer
+                    persist_assistant_message, message.chat_id, sent_reply.message_id, timetable_answer, message.from_user.id if message.from_user else None
                 )
             except TelegramError:
                 log.exception("Could not send timetable answer.")
@@ -1013,7 +1018,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 if source_link:
                     reply_text += f"\nالمصدر: {source_link}"
                 sent_reply = await message.reply_text(reply_text, disable_web_page_preview=True)
-                await asyncio.to_thread(persist_assistant_message, message.chat_id, sent_reply.message_id, reply_text)
+                await asyncio.to_thread(persist_assistant_message, message.chat_id, sent_reply.message_id, reply_text, message.from_user.id if message.from_user else None)
                 return
         except Exception:
             log.exception("Could not answer from a saved announcement; falling back to human review.")
@@ -1040,7 +1045,7 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
                     f"إجابة من الأسئلة الشائعة (FAQ #{faq_id}):\n{answer}",
                     disable_web_page_preview=True,
                 )
-                await asyncio.to_thread(persist_assistant_message, message.chat_id, sent_reply.message_id, f"إجابة من الأسئلة الشائعة (FAQ #{faq_id}): {answer}")
+                await asyncio.to_thread(persist_assistant_message, message.chat_id, sent_reply.message_id, f"إجابة من الأسئلة الشائعة (FAQ #{faq_id}): {answer}", message.from_user.id if message.from_user else None)
                 await asyncio.to_thread(
                     lambda: _exec(
                         "UPDATE faqs SET last_used_at=? WHERE id=?",
