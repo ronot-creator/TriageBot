@@ -169,6 +169,26 @@ class BotPersistenceAndQuotaTests(unittest.TestCase):
         self.assertIn("'assistant'", insert[0])
 
 
+class ActivityUpdateDetectionTests(unittest.TestCase):
+    def test_detects_explicit_english_activity_updates_without_ai(self):
+        self.assertTrue(BOT.looks_like_activity_update("TBL group 6 is cancelled tomorrow"))
+        self.assertTrue(BOT.looks_like_activity_update("The lecture moved to Thursday at 10"))
+        self.assertTrue(BOT.looks_like_activity_update("GD is confirmed for group 3"))
+
+    def test_detects_arabic_activity_updates_without_ai(self):
+        self.assertTrue(BOT.looks_like_activity_update("الـTBL اتلغى بكرة"))
+        self.assertTrue(BOT.looks_like_activity_update("محاضرة التشريح اتأجلت ليوم الخميس"))
+
+    def test_ignores_ordinary_chatter_and_unrelated_keywords(self):
+        self.assertFalse(BOT.looks_like_activity_update("Good morning everyone"))
+        self.assertFalse(BOT.looks_like_activity_update("I like the lecture"))
+        self.assertFalse(BOT.looks_like_activity_update("TBL was difficult today"))
+
+    def test_detector_only_identifies_candidates_not_authority(self):
+        # Authority is enforced separately by leader_clarification_handler/is_leader.
+        self.assertTrue(BOT.looks_like_activity_update("TBL cancelled tomorrow"))
+
+
 class LeaderGroupConfigurationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         FAKE_DB.config.clear()
