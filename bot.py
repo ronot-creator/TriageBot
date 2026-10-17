@@ -1939,11 +1939,11 @@ def looks_like_activity_update(text: str) -> bool:
     status_or_schedule = re.search(
         r"cancel(?:led|ed)?|postpon(?:e[dt])?|reschedul(?:e[dt])?|moved|shifted|"
         r"changed?|confirmed?|added|removed|scheduled|no longer|not happening|"
-        r"tomorrow|today|tonight|next week|on (?:mon|tues|wednes|thurs|fri|satur|sun)day|"
+        r"tomorrow|next week|on (?:mon|tues|wednes|thurs|fri|satur|sun)day|"
         r"\b(?:at|from)\s+\d|\b20\d{2}-\d{2}-\d{2}\b|\b\d{1,2}[/-]\d{1,2}\b|"
         r"اتلغى|تلغى|ملغي|ملغية|إلغاء|الغاء|اتأجل|تأجل|تأجيل|اتنقل|اتغير|تغيير|"
         r"اتأكد|تأكد|مؤكد|اتحدد|هيتعمل|هيتلغى|مش هيبقى|بدل|تبديل|اتضاف|إضافة|اضافة|"
-        r"اتشال|اتشالت|بكرة|بكره|غدا|غداً|النهارده|النهاردة|الساعة|يوم الخميس|يوم الأحد|يوم الاحد",
+        r"اتشال|اتشالت|بكرة|بكره|غدا|غداً|الساعة|يوم الخميس|يوم الأحد|يوم الاحد",
         value,
     )
     return bool(status_or_schedule)
