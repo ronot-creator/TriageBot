@@ -13,9 +13,10 @@ Required environment variables:
   OWNER_TELEGRAM_ID
 
 Optional:
-  GEMINI_MODEL=gemini-2.5-flash
-  GEMINI_RPM_LIMIT=10
-  GEMINI_RPD_LIMIT=1000
+  GEMINI_MODEL=gemini-3.5-flash-lite
+  GEMINI_FALLBACK_MODEL=gemini-3.1-flash-lite
+  GEMINI_PER_MODEL_RPM_LIMIT=15
+  GEMINI_PER_MODEL_RPD_LIMIT=500
   MAX_MEDIA_MB=15
   CONTEXT_MESSAGES=20
   ALLOWED_GROUP_ID=       # optional discussion group ID; recommended once known
