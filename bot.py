@@ -804,10 +804,17 @@ async def call_gemini(
             await asyncio.to_thread(log_model_request, "google", model_name, "empty_response",
                 int((time.monotonic() - attempt_started) * 1000), "empty_response", str(message.chat_id))
             log.error("Gemini returned no parsable content from model %s.", model_name)
+            if model_index + 1 < len(models_to_try):
+                log.warning("Gemini returned an empty response from %s; trying approved fallback %s.", model_name, models_to_try[model_index + 1])
+                continue
             return None
         except Exception as exc:
             error_text = str(exc).lower()
-            retryable = any(token in error_text for token in ("429", "resource_exhausted", "quota", "rate limit", "too many requests"))
+            retryable = any(token in error_text for token in (
+                "429", "resource_exhausted", "quota", "rate limit", "too many requests",
+                "500", "502", "503", "504", "unavailable", "deadline", "timeout", "internal",
+                "validationerror", "jsondecodeerror",
+            ))
             error_category = "quota_or_rate_limit" if retryable else type(exc).__name__
             await asyncio.to_thread(log_model_request, "google", model_name, "error",
                 int((time.monotonic() - attempt_started) * 1000), error_category, str(message.chat_id))
