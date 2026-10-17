@@ -266,6 +266,14 @@ class PrivateQuestionHandlerTests(unittest.IsolatedAsyncioTestCase):
         persist_answer.assert_called_once_with(321, 89, "لا توجد بيانات مؤكدة كافية.", 321)
 
 
+    async def test_private_timetable_answer_uses_deterministic_result_without_gemini(self):
+        expected = "لا توجد بيانات مؤكدة عن حالة TBL."
+        with patch.object(BOT, "private_qa_sources", return_value=('{"faqs":[]}', expected)), \
+             patch.object(BOT, "gemini_async") as model_client:
+            answer = await BOT.answer_private_question("Is TBL cancelled for group 6?", 321)
+        self.assertEqual(answer, expected)
+        model_client.models.generate_content.assert_not_called()
+
     async def test_private_database_answer_rejects_a_fabricated_source_id(self):
         evidence = '{"faqs":[{"id":1,"question":"TBL","answer":"Not confirmed"}],"approved_announcements":[],"activity_updates":[],"timetable_records":[]}'
         response = SimpleNamespace(parsed=BOT.PrivateAnswer(
