@@ -1,0 +1,173 @@
+"""Regression tests for the bot's deterministic persistence and quota guards.
+
+These tests mock the external database/client constructors: they never contact
+Turso, Telegram, or Gemini and consume no API quota.
+"""
+from __future__ import annotations
+
+import importlib
+import os
+import sys
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+
+class FakeResult:
+    def __init__(self, rows=None, rows_affected=0):
+        self.rows = rows or []
+        self.rows_affected = rows_affected
+
+
+class FakeDB:
+    def __init__(self):
+        self.calls = []
+        self.blacklisted = set()
+        self.config = {}
+        self.model_usage = {}
+        self.api_usage = {}
+        self.processed = set()
+
+    def execute(self, sql, args=()):
+        args = tuple(args)
+        self.calls.append((sql, args))
+        normalized = " ".join(sql.split()).lower()
+
+        if normalized.startswith("select 1 from blacklist"):
+            return FakeResult([(1,)] if args[0] in self.blacklisted else [])
+        if normalized.startswith("select value from config"):
+            return FakeResult([(self.config[args[0]],)] if args[0] in self.config else [])
+        if normalized.startswith("insert into config"):
+            self.config[args[0]] = args[1]
+            return FakeResult(rows_affected=1)
+        if normalized.startswith("insert or ignore into model_usage"):
+            self.model_usage.setdefault((args[0], args[1]), 0)
+            return FakeResult(rows_affected=1)
+        if normalized.startswith("update model_usage set requests=requests+1"):
+            key = (args[0], args[1])
+            if self.model_usage.get(key, 0) < args[2]:
+                self.model_usage[key] = self.model_usage.get(key, 0) + 1
+                return FakeResult(rows_affected=1)
+            return FakeResult(rows_affected=0)
+        if normalized.startswith("insert or ignore into api_usage"):
+            self.api_usage.setdefault(args[0], 0)
+            return FakeResult(rows_affected=1)
+        if normalized.startswith("update api_usage set requests=requests+1"):
+            self.api_usage[args[0]] = self.api_usage.get(args[0], 0) + 1
+            return FakeResult(rows_affected=1)
+        if normalized.startswith("insert or ignore into processed_messages"):
+            key = (args[0], args[1])
+            if key in self.processed:
+                return FakeResult(rows_affected=0)
+            self.processed.add(key)
+            return FakeResult(rows_affected=1)
+        return FakeResult()
+
+
+def load_bot_with_mocked_clients():
+    fake_db = FakeDB()
+    env = {
+        "TELEGRAM_BOT_TOKEN": "test-telegram-token",
+        "GEMINI_API_KEY": "test-gemini-key",
+        "TURSO_DATABASE_URL": "https://example.turso.io",
+        "TURSO_AUTH_TOKEN": "test-turso-token",
+        "OWNER_TELEGRAM_ID": "999",
+        "GEMINI_PER_MODEL_RPM_LIMIT": "15",
+        "GEMINI_PER_MODEL_RPD_LIMIT": "2",
+        "ALLOW_LOCAL_DB": "0",
+    }
+    # Import bot.py only with all network-facing constructors mocked.
+    with patch.dict(os.environ, env):
+        with patch("libsql_client.create_client_sync", return_value=fake_db):
+            with patch("google.genai.Client") as gemini_client:
+                gemini_client.return_value.aio = SimpleNamespace()
+                if "bot" in sys.modules:
+                    module = importlib.reload(sys.modules["bot"])
+                else:
+                    module = importlib.import_module("bot")
+    return module, fake_db
+
+
+BOT, FAKE_DB = load_bot_with_mocked_clients()
+
+
+class BotPersistenceAndQuotaTests(unittest.TestCase):
+    def setUp(self):
+        FAKE_DB.calls.clear()
+        FAKE_DB.blacklisted.clear()
+        FAKE_DB.config.clear()
+        FAKE_DB.model_usage.clear()
+        FAKE_DB.api_usage.clear()
+        FAKE_DB.processed.clear()
+        BOT.MODEL_NAME = "gemini-3.5-flash-lite"
+        BOT.FALLBACK_MODEL = "gemini-3.1-flash-lite"
+        BOT.RPD_LIMIT = 2
+
+    def test_only_two_approved_models_are_allowed(self):
+        self.assertEqual(
+            BOT.APPROVED_MODELS,
+            {"gemini-3.5-flash-lite", "gemini-3.1-flash-lite"},
+        )
+        self.assertFalse(BOT.reserve_daily_request("unapproved-model"))
+        self.assertEqual(FAKE_DB.model_usage, {})
+
+    def test_daily_quota_is_enforced_per_model(self):
+        primary = "gemini-3.5-flash-lite"
+        fallback = "gemini-3.1-flash-lite"
+        self.assertTrue(BOT.reserve_daily_request(primary))
+        self.assertTrue(BOT.reserve_daily_request(primary))
+        self.assertFalse(BOT.reserve_daily_request(primary))
+        self.assertTrue(BOT.reserve_daily_request(fallback))
+        self.assertTrue(BOT.reserve_daily_request(fallback))
+        self.assertFalse(BOT.reserve_daily_request(fallback))
+        self.assertEqual(sorted(FAKE_DB.model_usage.values()), [2, 2])
+
+    def test_message_deduplication_allows_only_first_claim(self):
+        self.assertTrue(BOT.claim_message_for_processing(-100123, 77))
+        self.assertFalse(BOT.claim_message_for_processing(-100123, 77))
+        self.assertTrue(BOT.claim_message_for_processing(-100123, 78))
+
+    def test_owner_cannot_be_blacklisted(self):
+        FAKE_DB.blacklisted.add(999)
+        self.assertFalse(BOT.is_blacklisted(999))
+
+    def test_non_owner_blacklist_is_respected(self):
+        FAKE_DB.blacklisted.add(123)
+        self.assertTrue(BOT.is_blacklisted(123))
+        self.assertFalse(BOT.is_blacklisted(124))
+
+    def test_group_context_persistence_keeps_chat_and_user_identity(self):
+        message = SimpleNamespace(
+            chat_id=-100123,
+            message_id=55,
+            from_user=SimpleNamespace(is_bot=False, id=321, full_name="Student", username=None),
+            text="When is anatomy?",
+            caption=None,
+            photo=None,
+            video=None,
+            voice=None,
+            audio=None,
+            document=None,
+            animation=None,
+            sticker=None,
+        )
+        BOT.persist_context_message(message)
+        insert = next(
+            (sql, args) for sql, args in FAKE_DB.calls
+            if "INSERT OR IGNORE INTO conversation_messages" in sql
+        )
+        self.assertEqual(insert[1][:3], (-100123, 55, 321))
+        self.assertIn("'user'", insert[0])
+
+    def test_assistant_context_is_associated_with_the_originating_user(self):
+        BOT.persist_assistant_message(-100123, 56, "Tuesday, 9 AM", user_id=321)
+        insert = next(
+            (sql, args) for sql, args in FAKE_DB.calls
+            if "INSERT OR IGNORE INTO conversation_messages" in sql
+        )
+        self.assertEqual(insert[1][:3], (-100123, 56, 321))
+        self.assertIn("'assistant'", insert[0])
+
+
+if __name__ == "__main__":
+    unittest.main()
