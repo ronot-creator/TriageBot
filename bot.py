@@ -813,13 +813,13 @@ async def call_gemini(
             retryable = any(token in error_text for token in (
                 "429", "resource_exhausted", "quota", "rate limit", "too many requests",
                 "500", "502", "503", "504", "unavailable", "deadline", "timeout", "internal",
-                "validationerror", "jsondecodeerror",
+                "validationerror", "validation error", "jsondecodeerror",
             ))
-            error_category = "quota_or_rate_limit" if retryable else type(exc).__name__
+            error_category = "quota_or_transient_failure" if retryable else type(exc).__name__
             await asyncio.to_thread(log_model_request, "google", model_name, "error",
                 int((time.monotonic() - attempt_started) * 1000), error_category, str(message.chat_id))
             if model_index + 1 < len(models_to_try) and retryable:
-                log.warning("Primary model %s hit a quota/rate limit; trying configured fallback %s.", model_name, models_to_try[model_index + 1])
+                log.warning("Model %s failed with a retryable error; trying approved fallback %s.", model_name, models_to_try[model_index + 1])
                 continue
             log.exception("Gemini request failed for model %s.", model_name)
             return None
