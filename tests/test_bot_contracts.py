@@ -265,6 +265,37 @@ class PrivateQuestionHandlerTests(unittest.IsolatedAsyncioTestCase):
         persist_user.assert_called_once_with(message)
         persist_answer.assert_called_once_with(321, 89, "لا توجد بيانات مؤكدة كافية.", 321)
 
+
+    async def test_private_database_answer_rejects_a_fabricated_source_id(self):
+        evidence = '{"faqs":[{"id":1,"question":"TBL","answer":"Not confirmed"}],"approved_announcements":[],"activity_updates":[],"timetable_records":[]}'
+        response = SimpleNamespace(parsed=BOT.PrivateAnswer(
+            answer="The TBL is cancelled.", answer_type="database", sources=["FAQ:999"], confidence=0.99
+        ))
+        model_client = SimpleNamespace(models=SimpleNamespace(generate_content=AsyncMock(return_value=response)))
+        with patch.object(BOT, "private_qa_sources", return_value=(evidence, None)), \
+             patch.object(BOT, "wait_for_rpm_slot", new_callable=AsyncMock), \
+             patch.object(BOT, "reserve_daily_request", return_value=True), \
+             patch.object(BOT, "log_model_request"), \
+             patch.object(BOT, "gemini_async", model_client):
+            answer = await BOT.answer_private_question("Is TBL cancelled?", 321)
+        self.assertIn("لم أجد مصدراً موثوقاً", answer)
+        self.assertNotIn("The TBL is cancelled", answer)
+
+    async def test_private_database_answer_accepts_only_a_real_source_id(self):
+        evidence = '{"faqs":[{"id":1,"question":"TBL","answer":"Not confirmed"}],"approved_announcements":[],"activity_updates":[],"timetable_records":[]}'
+        response = SimpleNamespace(parsed=BOT.PrivateAnswer(
+            answer="The FAQ says it is not confirmed.", answer_type="database", sources=["FAQ:1"], confidence=0.99
+        ))
+        model_client = SimpleNamespace(models=SimpleNamespace(generate_content=AsyncMock(return_value=response)))
+        with patch.object(BOT, "private_qa_sources", return_value=(evidence, None)), \
+             patch.object(BOT, "wait_for_rpm_slot", new_callable=AsyncMock), \
+             patch.object(BOT, "reserve_daily_request", return_value=True), \
+             patch.object(BOT, "log_model_request"), \
+             patch.object(BOT, "gemini_async", model_client):
+            answer = await BOT.answer_private_question("What does the FAQ say?", 321)
+        self.assertIn("The FAQ says it is not confirmed.", answer)
+        self.assertIn("FAQ:1", answer)
+
     async def test_explicit_morehelp_still_forwards_to_owner(self):
         replies = []
 
