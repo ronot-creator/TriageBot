@@ -31,13 +31,16 @@ def looks_like_schedule_question(text:str)->bool:
     # date/time or timetable cue.
     group_ref = re.search(r"(?:group|grp|جروب|مجموعة)\s*#?\s*\\d{1,2}\\b", n)
     if group_ref:
-        contextual_cues = (
-            "when", "where", "what", "tomorrow", "today", "next week", "next",
-            "timetable", "schedule", "lecture", "practical", "exam", "gd", "tbl",
-            "room", "hall", "امتى", "متى", "بكره", "بكرة", "بكرا", "النهارده",
-            "جدول", "محاضرة", "عملي", "امتحان", "ديسكشن",
+        question_cues = (
+            "when", "where", "what do", "do we have", "is there", "which room",
+            "امتى", "متى", "هل", "؟", "?",
         )
-        if any(normalize_text(cue) in n for cue in contextual_cues):
+        timetable_cues = (
+            "timetable", "schedule", "lecture", "practical", "exam", "gd", "tbl",
+            "room", "hall", "tomorrow", "today", "next week", "بكره", "بكرة",
+            "بكرا", "النهارده", "جدول", "محاضرة", "عملي", "امتحان", "ديسكشن",
+        )
+        if any(normalize_text(cue) in n for cue in question_cues + timetable_cues):
             return True
     return False
 
