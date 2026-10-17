@@ -95,6 +95,12 @@ class TBLStatusOverlayTests(unittest.TestCase):
   ]),"Is there a TBL for group 6?")
   self.assertIn("مؤكد",answer)
   self.assertIn("Confirmed by leaders",answer)
+ def test_cancelled_tbl_uses_latest_leader_record(self):
+  answer=answer_timetable_question(self._db([
+   ("TBL group 6","cancelled",None,None,"Cancelled by leaders","GD","2026-10-16")
+  ]),"Is there a TBL for group 6?")
+  self.assertIn("ملغي حسب آخر تحديث مسجل",answer)
+  self.assertIn("Cancelled by leaders",answer)
  def test_possible_tbl_stays_unconfirmed(self):
   answer=answer_timetable_question(self._db([
    ("TBL group 6","unknown",None,None,"Possible, not confirmed","GD","2026-10-16")
