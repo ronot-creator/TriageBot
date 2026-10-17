@@ -70,3 +70,11 @@ The startup import is idempotent, and a failed import stops startup rather than 
 ## Gemini model policy
 
 Only `gemini-3.5-flash-lite` and `gemini-3.1-flash-lite` are accepted. The default is 3.5 Flash-Lite with 3.1 Flash-Lite as fallback. Per-model limits default to 15 requests/minute and 500 requests/day; application settings clamp them to those maximums. Google enforces token-per-minute limits at the API. These controls do not guarantee a free quota is available, and a provider quota response still triggers fallback when possible.
+
+
+### Automatic leader activity updates (selective AI)
+- Ordinary group messages are checked locally first; routine chatter does not call Gemini.
+- In the configured leadership group, only authorized leaders' messages that match a local activity + status/date/time pattern enter the existing structured activity-update parser.
+- Ambiguous updates are saved as pending clarifications, not as confirmed timetable changes. Clear validated updates are stored in Turso with the source chat/message and leader ID.
+- Student messages never become official timetable changes merely because they contain a keyword; they continue through the discussion-group triage/verification path.
+- Keyword detection is a pre-filter, not proof. The parser must not invent missing dates, groups, or statuses.
