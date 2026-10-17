@@ -29,7 +29,7 @@ def looks_like_schedule_question(text:str)->bool:
     # Generic mentions of a group are common in ordinary student chat. Do not
     # route them to timetable Q&A unless there is a group identifier plus a
     # date/time or timetable cue.
-    group_ref = re.search(r"(?:group|grp|جروب|مجموعة)\s*#?\s*\\d{1,2}\\b", n)
+    group_ref = re.search(r"(?:group|grp|جروب|مجموعة)\s*#?\s*\d{1,2}\b", n)
     if group_ref:
         question_cues = (
             "when", "where", "what do", "do we have", "is there", "which room",
