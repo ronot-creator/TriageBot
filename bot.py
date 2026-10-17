@@ -1651,11 +1651,11 @@ Database evidence JSON:
             if not answer:
                 answer = "المعلومات المتاحة لا تكفي لإجابة موثوقة. وضّح السؤال أو اطلب تأكيداً من القيادة."
             if parsed.answer_type == "database" and parsed.sources:
-                answer += "\\n\\nالمصدر: " + ", ".join(parsed.sources[:5])
+                answer += "\n\nالمصدر: " + ", ".join(parsed.sources[:5])
             elif parsed.answer_type == "insufficient_info":
-                answer += "\\n\\nلا أملك بيانات مؤكدة كافية للإجابة عن هذه النقطة."
+                answer += "\n\nلا أملك بيانات مؤكدة كافية للإجابة عن هذه النقطة."
             elif parsed.answer_type == "general":
-                answer += "\\n\\nملاحظة: هذه إجابة عامة وليست تأكيداً لسياسة أو معلومة جامعية من قاعدة البيانات."
+                answer += "\n\nملاحظة: هذه إجابة عامة وليست تأكيداً لسياسة أو معلومة جامعية من قاعدة البيانات."
             return answer[:3500]
         except Exception as exc:
             error_text = str(exc).lower()
