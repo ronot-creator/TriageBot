@@ -59,13 +59,13 @@ Run `python -m compileall -q .` and `python -m unittest discover -s tests -v`. G
 
 The dedicated workbook importer creates `timetable_events`, `exam_events`, `translation_aliases`, `interpretation_rules`. It is separate from the leader-approved generic `timetable_entries` import flow.
 
-To load the supplied workbook using the web-only workflow, upload `Medical_Timetable_FirstYear_Complete.xlsx` to `assets/` on the deployed branch via GitHub's web UI, then set Render's Start Command to:
+To load the supplied workbook using the web-only workflow, upload `Medical_Timetable_FirstYear_Complete.xlsx` to `assets/` on the deployed branch via GitHub's web UI. The bot imports this workbook automatically during startup when the file exists, before Telegram polling begins; set Render's Start Command to:
 
 ```sh
-python import_timetable.py assets/Medical_Timetable_FirstYear_Complete.xlsx && python bot.py
+python bot.py
 ```
 
-The importer runs before the bot and must succeed before the service starts. See [TIMETABLE_IMPORT.md](TIMETABLE_IMPORT.md). Timetable questions use deterministic alias resolution and parameterized SQL; the model is not allowed to invent schedule facts or generate SQL. Group IDs are matched exactly, and room-sharing/source uncertainty is preserved.
+The startup import is idempotent, and a failed import stops startup rather than serving a partial timetable. You can still run `python import_timetable.py assets/Medical_Timetable_FirstYear_Complete.xlsx` manually for a deliberate one-off import. See [TIMETABLE_IMPORT.md](TIMETABLE_IMPORT.md). Timetable questions use deterministic alias resolution and parameterized SQL; the model is not allowed to invent schedule facts or generate SQL. Group IDs are matched exactly, and room-sharing/source uncertainty is preserved.
 
 ## Gemini model policy
 
