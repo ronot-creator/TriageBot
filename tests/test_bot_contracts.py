@@ -219,6 +219,19 @@ class LeaderGroupConfigurationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(FAKE_DB.config.get("leader_chat_id"), "-100555")
         self.assertTrue(any("-100555" in text for text in replies))
 
+    async def test_leader_cannot_blacklist_owner_from_ticket(self):
+        answers = []
+
+        async def answer(text, show_alert=False):
+            answers.append((text, show_alert))
+
+        query = SimpleNamespace(answer=answer)
+        update = SimpleNamespace(callback_query=query)
+        with patch.object(BOT, "ticket_row", return_value=(1, "URGENT", "summary", 999)):
+            await BOT.blacklist_ticket_callback(update, SimpleNamespace(), 42, 123)
+        self.assertFalse(any("INSERT INTO blacklist" in sql for sql, _ in FAKE_DB.calls))
+        self.assertTrue(any("مالك البوت" in text for text, _ in answers))
+
 
 if __name__ == "__main__":
     unittest.main()
