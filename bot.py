@@ -1202,7 +1202,7 @@ async def announcement_channel_handler(update: Update, context: ContextTypes.DEF
         "deadlines, room/lecture changes, student services, or official campus events. Ignore unrelated commercial ads, "
         "affiliate marketing, generic promotions, and spam. Official college event registration can be relevant. "
         "Return JSON {relevant:boolean, category:string, summary:string}. Never invent dates, rooms, or times. "
-        "If uncertain, relevant=false.\\nPOST TEXT:\\n" + original[:12000]
+        "If uncertain, relevant=false.\nPOST TEXT:\n" + original[:12000]
     )
     models_to_try = [MODEL_NAME]
     if FALLBACK_MODEL and FALLBACK_MODEL != MODEL_NAME:
@@ -1286,7 +1286,7 @@ async def announcement_channel_handler(update: Update, context: ContextTypes.DEF
             leader_chat_id = get_leader_chat_id()
             if leader_chat_id:
                 await context.bot.send_message(chat_id=leader_chat_id,
-                    text=f"إعلان محتمل يحتاج مراجعة بشرية\\nالتصنيف: {safe_html(category)}\\nالملخص المقترح: {safe_html(summary)}\\nالمصدر: {safe_html(source_link or 'رابط خاص غير متاح')}\\n\\nلم يتم نشر الملخص. استخدم /pendingannouncements ثم /approveannouncement ID أو /editannouncement ID | النص أو /rejectannouncement ID.",
+                    text=f"إعلان محتمل يحتاج مراجعة بشرية\nالتصنيف: {safe_html(category)}\nالملخص المقترح: {safe_html(summary)}\nالمصدر: {safe_html(source_link or 'رابط خاص غير متاح')}\n\nلم يتم نشر الملخص. استخدم /pendingannouncements ثم /approveannouncement ID أو /editannouncement ID | النص أو /rejectannouncement ID.",
                     parse_mode="HTML", disable_web_page_preview=True)
     except Exception:
         log.exception("Announcement ingest/classification failed; nothing was published.")
