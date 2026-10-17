@@ -233,5 +233,65 @@ class LeaderGroupConfigurationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("مالك البوت" in text for text, _ in answers))
 
 
+class PrivateQuestionHandlerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ordinary_private_message_gets_direct_ai_answer_and_is_persisted(self):
+        replies = []
+
+        async def reply_text(text, **kwargs):
+            replies.append(text)
+            return SimpleNamespace(message_id=89)
+
+        user = SimpleNamespace(id=321, full_name="Student", username=None, is_bot=False)
+        message = SimpleNamespace(
+            chat_id=321, message_id=88, from_user=user, text="Is TBL cancelled?", caption=None,
+            reply_to_message=None, photo=None, video=None, voice=None, audio=None, document=None,
+            animation=None, sticker=None,
+        )
+        message.reply_text = reply_text
+        update = SimpleNamespace(
+            effective_message=message, effective_user=user,
+            effective_chat=SimpleNamespace(type="private", id=321),
+        )
+        context = SimpleNamespace(user_data={}, bot=SimpleNamespace())
+        with patch.object(BOT, "claim_message_for_processing", return_value=True), \\
+             patch.object(BOT, "persist_context_message") as persist_user, \\
+             patch.object(BOT, "make_context", return_value="private history only"), \\
+             patch.object(BOT, "answer_private_question", new_callable=unittest.mock.AsyncMock,
+                          return_value="لا توجد بيانات مؤكدة كافية.") as answer, \\
+             patch.object(BOT, "persist_assistant_message") as persist_answer:
+            await BOT.morehelp_message_handler(update, context)
+        self.assertEqual(replies, ["لا توجد بيانات مؤكدة كافية."])
+        answer.assert_awaited_once_with("Is TBL cancelled?", 321, "private history only")
+        persist_user.assert_called_once_with(message)
+        persist_answer.assert_called_once_with(321, 89, "لا توجد بيانات مؤكدة كافية.", 321)
+
+    async def test_explicit_morehelp_still_forwards_to_owner(self):
+        replies = []
+
+        async def reply_text(text, **kwargs):
+            replies.append(text)
+            return SimpleNamespace(message_id=99)
+
+        async def send_message(**kwargs):
+            self.assertEqual(kwargs["chat_id"], BOT.OWNER_ID)
+
+        user = SimpleNamespace(id=321, full_name="Student", username=None, is_bot=False)
+        message = SimpleNamespace(
+            chat_id=321, message_id=98, from_user=user, text="Please contact a leader", caption=None,
+            reply_to_message=None, photo=None, video=None, voice=None, audio=None, document=None,
+            animation=None, sticker=None, reply_text=reply_text,
+        )
+        update = SimpleNamespace(
+            effective_message=message, effective_user=user,
+            effective_chat=SimpleNamespace(type="private", id=321),
+        )
+        context = SimpleNamespace(user_data={"awaiting_more_help": True}, bot=SimpleNamespace(send_message=send_message))
+        with patch.object(BOT, "answer_private_question", new_callable=unittest.mock.AsyncMock) as answer:
+            await BOT.morehelp_message_handler(update, context)
+        answer.assert_not_awaited()
+        self.assertNotIn("awaiting_more_help", context.user_data)
+        self.assertTrue(any("تم إرسال استفسارك" in text for text in replies))
+
+
 if __name__ == "__main__":
     unittest.main()
