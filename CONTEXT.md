@@ -1,6 +1,6 @@
 # Project Overview & Architecture
 
-> Snapshot updated: 2026-10-18. Repository: ronot-creator/TriageBot. PR branch fix/audit-announcement-fallback-help is at commit 9e6a4e66cbd96ff110e4d4bdf7c5a8cfe285f2df, not production. PR #11 is open and unmerged. Production was last verified on main at b866af600cce323521faec78dbb53219aed633a7. Do not merge or deploy without explicit owner approval.
+> Snapshot updated: 2026-10-18. Repository: ronot-creator/TriageBot. PR branch: fix/audit-announcement-fallback-help (see PR #11 for the live head SHA), not production. PR #11 is open and unmerged. The latest executable-code/test changes were made at 9e6a4e66cbd96ff110e4d4bdf7c5a8cfe285f2df; later commits refresh documentation and handover notes. Production was last verified on main at b866af600cce323521faec78dbb53219aed633a7. Do not merge or deploy without explicit owner approval.
 
 ## Purpose
 
@@ -46,8 +46,8 @@
 
 - Repo: https://github.com/ronot-creator/TriageBot; default branch main.
 - Production last known commit: b866af600cce323521faec78dbb53219aed633a7.
-- Active PR: #11, “Add grounded private Q&A and harden triage safeguards”, branch fix/audit-announcement-fallback-help, current head 9e6a4e66cbd96ff110e4d4bdf7c5a8cfe285f2df, open and unmerged.
-- Latest verified CI at this PR head: Actions run 39144786550 (https://github.com/ronot-creator/TriageBot/actions/runs/39144786550), completed successfully 2026-10-18. python -m compileall -q . passed; python -m unittest discover -s tests -v passed 48 tests. Tests mock external services and do not prove live Telegram, Gemini, Turso or Render integration.
+- Active PR: #11, “Add grounded private Q&A and harden triage safeguards”, branch fix/audit-announcement-fallback-help, open and unmerged; see PR #11 for the live head SHA.
+- Latest verified executable-code CI: Actions run 39144786550 (https://github.com/ronot-creator/TriageBot/actions/runs/39144786550) passed compileall and 48 unit tests on the code/test commit. The subsequent documentation-only refresh also passed CI in run 39144852176 (https://github.com/ronot-creator/TriageBot/actions/runs/39144852176), with the same 48 tests. Tests mock external services and do not prove live Telegram, Gemini, Turso or Render integration.
 - An older PR description referenced 39 tests; the latest verified branch count is 48. Re-fetch GitHub state before relying on this snapshot.
 - PR #11 is intentionally not merged. Commits on this branch do not update production. Never merge, deploy, change Render settings or modify credentials without explicit owner approval.
 - leader_chat_id remains unconfigured until the owner uses /setleaders. Do not assume current values for optional news/discussion/student group variables; inspect Render without exposing secret values.
