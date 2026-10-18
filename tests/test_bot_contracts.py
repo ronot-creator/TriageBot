@@ -399,5 +399,50 @@ class BoundedEvidenceSerializationTests(unittest.TestCase):
 
 
 
+
+class InclusiveGroupMonitoringTests(unittest.IsolatedAsyncioTestCase):
+    async def _update(self, chat_id):
+        user = SimpleNamespace(id=321, is_bot=False, full_name="Student", username=None)
+        message = SimpleNamespace(
+            chat_id=chat_id, message_id=77, from_user=user, text="ordinary group message",
+            caption=None, reply_to_message=None,
+        )
+        return SimpleNamespace(
+            effective_message=message,
+            effective_chat=SimpleNamespace(type=BOT.ChatType.SUPERGROUP, id=chat_id),
+            effective_user=user,
+        )
+
+    async def test_leaders_group_is_observed_but_not_student_triaged(self):
+        update = await self._update(-1001)
+        with patch.object(BOT, "get_leader_chat_id", return_value=-1001), \\
+             patch.object(BOT, "is_blacklisted", return_value=False), \\
+             patch.object(BOT, "push_context") as push, \\
+             patch.object(BOT, "persist_context_message") as persist, \\
+             patch.object(BOT, "message_text", return_value="TBL cancelled"), \\
+             patch.object(BOT, "media_description", return_value=""), \\
+             patch.object(BOT, "get_active_keywords") as keywords:
+            await BOT.handle_group_message(update, SimpleNamespace())
+        push.assert_called_once()
+        persist.assert_called_once()
+        keywords.assert_not_called()
+
+    async def test_other_groups_are_not_restricted_to_a_single_group_id(self):
+        update = await self._update(-1002)
+        with patch.object(BOT, "get_leader_chat_id", return_value=-1001), \\
+             patch.object(BOT, "is_blacklisted", return_value=False), \\
+             patch.object(BOT, "push_context") as push, \\
+             patch.object(BOT, "persist_context_message") as persist, \\
+             patch.object(BOT, "message_text", return_value="ordinary group message"), \\
+             patch.object(BOT, "media_description", return_value=""), \\
+             patch.object(BOT, "get_active_keywords", return_value=[]) as keywords, \\
+             patch.object(BOT, "bot_is_mentioned", return_value=False), \\
+             patch.object(BOT, "matched_keyword", return_value=None), \\
+             patch.object(BOT, "looks_like_schedule_question", return_value=False):
+            await BOT.handle_group_message(update, SimpleNamespace())
+        push.assert_called_once()
+        persist.assert_called_once()
+        keywords.assert_called_once()
+
 if __name__ == "__main__":
     unittest.main()
