@@ -12,7 +12,7 @@ Optional existing settings and the new college-data settings are documented in [
 
 ## Student help and private support
 
-`/help` shows students the bot’s purpose, supported timetable/FAQ/announcement capabilities, and usage guidance. `/morehelp` accepts a question in private chat and sends it to the configured owner Telegram account (`OWNER_TELEGRAM_ID`); it does not depend on a Telegram leaders’ group. The owner must have opened the bot and pressed Start at least once so Telegram permits the bot to initiate a private message. Set optional `OWNER_USERNAME` to the owner’s public username (without `@`) to display it in help. Questions are not sent from group chat, to avoid exposing student queries publicly.
+`/help` shows the bot’s purpose, supported timetable/FAQ/announcement capabilities, and usage guidance. In a private chat, ordinary text questions are answered directly: timetable/TBL queries use deterministic database-backed logic; other college-specific questions use active activity updates, active FAQs, approved/published announcements, and imported timetable records as evidence. The AI must not invent college facts; it must report missing or conflicting information and validate FAQ, announcement, activity-update, imported timetable, or exam source identifiers before presenting a model-generated database answer. General-knowledge answers are labelled as general rather than official college information. Private conversation history is stored by private chat and user, and is not mixed with other users’ histories. Use `/morehelp` when you explicitly want to forward a message to the configured owner Telegram account (`OWNER_TELEGRAM_ID`); after `/morehelp`, the next text message is forwarded to the owner instead of being answered by AI. The owner must have opened the bot and pressed Start at least once so Telegram permits the bot to initiate a private message. Set optional `OWNER_USERNAME` to the owner’s public username (without `@`) to display it in help. Ordinary private questions are not posted to group chats.
 
 ## Database migration
 
@@ -47,7 +47,7 @@ The importer deliberately rejects unknown headers, unparseable dates/times, and 
 5. Summaries are only posted to the configured discussion group after explicit approval.
 6. When a student asks a triggered question, the bot may answer from relevant saved announcement records and include the source date/link. If no saved announcement supports the answer confidently, it falls back to the existing human-review flow.
 
-To find IDs: run `/chatid` as the owner inside the discussion group; set that value as both `DISCUSSION_GROUP_ID` and (recommended) `ALLOWED_GROUP_ID` if it is the student discussion group. For the news channel, add the bot as an administrator and publish a test post while `NEWS_CHANNEL_ID` is blank; the Render log records the numeric channel ID, which you can then add to the environment and redeploy.
+To find IDs: run `/chatid` as the owner inside the discussion group; set that value as `DISCUSSION_GROUP_ID`. The bot monitors eligible groups where it is installed; it does not require a single student-group allowlist. For the news channel, add the bot as an administrator and publish a test post while `NEWS_CHANNEL_ID` is blank; the Render log records the numeric channel ID, which you can then add to the environment and redeploy.
 
 Telegram bot updates do not provide automatic backfill of all old channel history; ingestion starts with posts/edits received after the bot is correctly configured. Treat AI summaries as drafts and verify dates, places and times against the original post.
 
@@ -70,3 +70,11 @@ The startup import is idempotent, and a failed import stops startup rather than 
 ## Gemini model policy
 
 Only `gemini-3.5-flash-lite` and `gemini-3.1-flash-lite` are accepted. The default is 3.5 Flash-Lite with 3.1 Flash-Lite as fallback. Per-model limits default to 15 requests/minute and 500 requests/day; application settings clamp them to those maximums. Google enforces token-per-minute limits at the API. These controls do not guarantee a free quota is available, and a provider quota response still triggers fallback when possible.
+
+
+### Automatic leader activity updates (selective AI)
+- Ordinary group messages are checked locally first; routine chatter does not call Gemini.
+- In the configured leadership group, only authorized leaders' messages that match a local activity + status/date/time pattern enter the existing structured activity-update parser.
+- Ambiguous updates are saved as pending clarifications, not as confirmed timetable changes. Clear validated updates are stored in Turso with the source chat/message and leader ID.
+- Student messages never become official timetable changes merely because they contain a keyword; they continue through the discussion-group triage/verification path.
+- Keyword detection is a pre-filter, not proof. The parser must not invent missing dates, groups, or statuses.
