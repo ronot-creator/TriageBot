@@ -19,8 +19,7 @@ Optional:
   GEMINI_PER_MODEL_RPD_LIMIT=500
   MAX_MEDIA_MB=15
   CONTEXT_MESSAGES=20
-  ALLOWED_GROUP_ID=       # optional discussion group ID; recommended once known
-  AUTO_FAQ_REPLY=true
+    AUTO_FAQ_REPLY=true
   FAQ_CONFIDENCE_THRESHOLD=0.85
   ALLOW_LOCAL_DB=0        # set to 1 only for local testing; Render disk is ephemeral
 """
