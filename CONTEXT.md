@@ -1,6 +1,6 @@
 # Project Overview & Architecture
 
-> Snapshot: 2026-10-17. Repository: ronot-creator/TriageBot. This handover describes PR branch fix/audit-announcement-fallback-help at commit 25060b7ebbfdd0a12dff09d0d48dccccc07a59ec, not production. PR #11 is open and unmerged. Production was last known to run main at b866af600cce323521faec78dbb53219aed633a7. Do not merge or deploy without explicit owner approval.
+> Snapshot updated: 2026-10-18. Repository: ronot-creator/TriageBot. PR branch fix/audit-announcement-fallback-help is at commit 9e6a4e66cbd96ff110e4d4bdf7c5a8cfe285f2df, not production. PR #11 is open and unmerged. Production was last verified on main at b866af600cce323521faec78dbb53219aed633a7. Do not merge or deploy without explicit owner approval.
 
 ## Purpose
 
@@ -46,9 +46,9 @@
 
 - Repo: https://github.com/ronot-creator/TriageBot; default branch main.
 - Production last known commit: b866af600cce323521faec78dbb53219aed633a7.
-- Active PR: #11, “Add grounded private Q&A and harden triage safeguards”, branch fix/audit-announcement-fallback-help, snapshot head 25060b7ebbfdd0a12dff09d0d48dccccc07a59ec, open and unmerged.
-- Latest verified CI at this PR head: Actions run #180 / 39046583428 (https://github.com/ronot-creator/TriageBot/actions/runs/39046583428), completed successfully 2026-10-17. python -m compileall -q . passed; python -m unittest discover -s tests -v passed 43 tests. Tests mock external services and do not prove live Telegram, Gemini, Turso or Render integration.
-- An older PR description references 39 tests; 43 is the later verified count. Re-fetch GitHub state before relying on this snapshot.
+- Active PR: #11, “Add grounded private Q&A and harden triage safeguards”, branch fix/audit-announcement-fallback-help, current head 9e6a4e66cbd96ff110e4d4bdf7c5a8cfe285f2df, open and unmerged.
+- Latest verified CI at this PR head: Actions run 39144786550 (https://github.com/ronot-creator/TriageBot/actions/runs/39144786550), completed successfully 2026-10-18. python -m compileall -q . passed; python -m unittest discover -s tests -v passed 48 tests. Tests mock external services and do not prove live Telegram, Gemini, Turso or Render integration.
+- An older PR description referenced 39 tests; the latest verified branch count is 48. Re-fetch GitHub state before relying on this snapshot.
 - PR #11 is intentionally not merged. Commits on this branch do not update production. Never merge, deploy, change Render settings or modify credentials without explicit owner approval.
 - leader_chat_id remains unconfigured until the owner uses /setleaders. Do not assume current values for optional news/discussion/student group variables; inspect Render without exposing secret values.
 
@@ -251,3 +251,12 @@ The next agent should work on the current PR branch unless explicitly told other
 6. State exactly what was tested and what was not; mocked unit tests are not live integration proof.
 7. Preserve Turso data and auditability; schema changes require backward-compatible migration and rollback/backup plan.
 8. If code and this document disagree, inspect current code and document the discrepancy before changing behavior. This handover is context, not permission to bypass safeguards.
+
+
+## 2026-10-18 follow-up repairs
+
+- Replaced unsafe `evidence_text[:26000]` truncation with `_bounded_evidence_json`, which bounds evidence fields/collections before serialization and returns valid JSON. Added oversized-evidence and source-identifier regression tests.
+- Removed the single-group `ALLOWED_GROUP_ID` allowlist. Eligible group messages are persisted across groups; the configured leaders' discussion is observed/persisted but excluded from student triage to avoid creating tickets in the internal leadership chat. Dedicated leader commands and clarification handling remain active. Added regression tests for group inclusion and the leader-chat boundary.
+- Global Telegram error handler now logs only the exception type instead of the exception message/traceback, reducing the risk of request URLs or secrets appearing in logs. Added a redaction regression test.
+- Latest verified CI on `9e6a4e66cbd96ff110e4d4bdf7c5a8cfe285f2df`: compileall passed and 48 unit tests passed. These are mocked CI tests, not live integration proof.
+- Production was not modified or redeployed. Render health-check configuration, credential rotation, live Turso verification, actual Telegram privacy-mode visibility, and owner `/setleaders` setup remain outstanding.
