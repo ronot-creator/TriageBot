@@ -103,7 +103,6 @@ RPM_LIMIT = min(15, max(1, int(os.getenv("GEMINI_PER_MODEL_RPM_LIMIT", "15"))))
 RPD_LIMIT = min(500, max(1, int(os.getenv("GEMINI_PER_MODEL_RPD_LIMIT", "500"))))
 MAX_MEDIA_BYTES = max(1, int(os.getenv("MAX_MEDIA_MB", "15"))) * 1024 * 1024
 CONTEXT_LIMIT = max(5, min(40, int(os.getenv("CONTEXT_MESSAGES", "20"))))
-ALLOWED_GROUP_ID_RAW = os.getenv("ALLOWED_GROUP_ID", "").strip()
 AUTO_FAQ_REPLY = os.getenv("AUTO_FAQ_REPLY", "true").lower() in {"1", "true", "yes"}
 FAQ_CONFIDENCE_THRESHOLD = float(os.getenv("FAQ_CONFIDENCE_THRESHOLD", "0.85"))
 ALLOW_LOCAL_DB = os.getenv("ALLOW_LOCAL_DB", "0").lower() in {"1", "true", "yes"}
@@ -122,7 +121,6 @@ if not GEMINI_API_KEY:
 if not OWNER_ID_RAW.isdigit():
     raise RuntimeError("OWNER_TELEGRAM_ID must be your numeric Telegram user ID.")
 OWNER_ID = int(OWNER_ID_RAW)
-ALLOWED_GROUP_ID = int(ALLOWED_GROUP_ID_RAW) if ALLOWED_GROUP_ID_RAW.lstrip("-").isdigit() else None
 
 if not TURSO_URL and not ALLOW_LOCAL_DB:
     raise RuntimeError(
@@ -913,17 +911,10 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     if message.from_user and message.from_user.is_bot:
         return
     leader_id = get_leader_chat_id()
-    if ALLOWED_GROUP_ID:
-        # When configured, monitor only the designated student discussion group.
-        if message.chat_id != ALLOWED_GROUP_ID:
-            return
-    elif leader_id and message.chat_id == leader_id:
-        # Until ALLOWED_GROUP_ID is configured, never triage leaders' own discussion.
-        return
     if message.from_user and await asyncio.to_thread(is_blacklisted, message.from_user.id):
         return
 
-    # Keep every observed group message as local context; no AI call happens just for this.
+    # Observe and persist eligible messages from every group; there is no one-group allowlist.
     push_context(message)
     try:
         await asyncio.to_thread(persist_context_message, message)
@@ -932,6 +923,12 @@ async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYP
     raw_text = message_text(message)
     media_desc = media_description(message)
     if not raw_text and not media_desc:
+        return
+
+    # The leaders' discussion is monitored and persisted, but is not student-triaged:
+    # this avoids sending tickets back into the internal leadership chat. Its dedicated
+    # commands and leader-clarification handler still operate normally.
+    if leader_id and message.chat_id == leader_id:
         return
 
     mentioned = bot_is_mentioned(message)
