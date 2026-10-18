@@ -124,7 +124,7 @@ Observed issues and risks to test; do not perform a wholesale rewrite before rep
 - Sender/role: update.effective_user.id, update.effective_chat.id/type and Telegram get_chat_member. Never trust username, display name or self-asserted role.
 - Student group visibility depends on privacy mode and group permissions. Confirm before claiming all messages are visible.
 - Leader group is not configured yet. Owner runs /setleaders inside it. Never run this for the owner.
-- News channel: bot must be administrator; configure numeric NEWS_CHANNEL_ID. Publication target: numeric DISCUSSION_GROUP_ID. Optional ALLOWED_GROUP_ID restricts triage to one student group.
+- News channel: bot must be administrator; configure numeric NEWS_CHANNEL_ID. Publication target: numeric DISCUSSION_GROUP_ID. All eligible groups are monitored; the configured leaders' discussion is observed and persisted but excluded from student triage.
 - Payloads are standard Telegram Update JSON handled by python-telegram-bot; no custom inbound payload. Telegram does not backfill old channel history automatically.
 - Avoid exposing bot-token-containing URLs in logs; HTTP request loggers are reduced to WARNING.
 
@@ -170,7 +170,7 @@ Observed issues and risks to test; do not perform a wholesale rewrite before rep
 
 - Known URL: https://triagebot-wrzu.onrender.com.
 - Required env names: TELEGRAM_BOT_TOKEN, GEMINI_API_KEY, TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, OWNER_TELEGRAM_ID.
-- Optional env names: OWNER_USERNAME, LEADER_TELEGRAM_IDS, GEMINI_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_PER_MODEL_RPM_LIMIT, GEMINI_PER_MODEL_RPD_LIMIT, MAX_MEDIA_MB, CONTEXT_MESSAGES, ALLOWED_GROUP_ID, AUTO_FAQ_REPLY, FAQ_CONFIDENCE_THRESHOLD, ALLOW_LOCAL_DB, NEWS_CHANNEL_ID, DISCUSSION_GROUP_ID, TIMETABLE_WORKBOOK_PATH, PORT, LOG_LEVEL.
+- Optional env names: OWNER_USERNAME, LEADER_TELEGRAM_IDS, GEMINI_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_PER_MODEL_RPM_LIMIT, GEMINI_PER_MODEL_RPD_LIMIT, MAX_MEDIA_MB, CONTEXT_MESSAGES, AUTO_FAQ_REPLY, FAQ_CONFIDENCE_THRESHOLD, ALLOW_LOCAL_DB, NEWS_CHANNEL_ID, DISCUSSION_GROUP_ID, TIMETABLE_WORKBOOK_PATH, PORT, LOG_LEVEL.
 - Intended build: pip install -r requirements.txt; intended start: python bot.py. Verify actual dashboard config before changing.
 - GET / and GET /health/live return 200; GET /health/ready returns 200 when ready, 503 during initialization/failure. UptimeRobot was set to check readiness every five minutes.
 - Health server binds 0.0.0.0:$PORT as required for a Render web service. It exposes status routes only.
