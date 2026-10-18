@@ -444,5 +444,17 @@ class InclusiveGroupMonitoringTests(unittest.IsolatedAsyncioTestCase):
         persist.assert_called_once()
         keywords.assert_called_once()
 
+
+class SafeErrorLoggingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_global_error_handler_does_not_log_exception_message(self):
+        sentinel = "secret-token-like-value"
+        context = SimpleNamespace(error=RuntimeError(sentinel))
+        with patch.object(BOT.log, "error") as log_error:
+            await BOT.error_handler(None, context)
+        logged = " ".join(str(arg) for arg in log_error.call_args.args)
+        self.assertNotIn(sentinel, logged)
+        self.assertIn("RuntimeError", logged)
+
+
 if __name__ == "__main__":
     unittest.main()
