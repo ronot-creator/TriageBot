@@ -2244,7 +2244,9 @@ async def ticket_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         log.info("Could not update ticket message after callback.")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    log.error("Unhandled Telegram handler error: %s", context.error, exc_info=context.error)
+    # Exception messages can contain request URLs or other sensitive details; log only the type.
+    error = getattr(context, "error", None)
+    log.error("Unhandled Telegram handler error (type=%s).", type(error).__name__ if error else "Unknown")
 
 # ----------------------------- Render health server ----------------------
 
