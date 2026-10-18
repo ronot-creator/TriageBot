@@ -1538,6 +1538,40 @@ async def deliver_more_help(
         )
 
 
+def _bounded_evidence_json(evidence: dict[str, object], max_chars: int = 26000) -> str:
+    """Serialize bounded evidence as valid JSON without slicing serialized output."""
+    bounded = json.loads(json.dumps(evidence, ensure_ascii=False, default=str))
+
+    def trim(value: object, string_limit: int, list_limit: int = 30) -> object:
+        if isinstance(value, dict):
+            return {str(key): trim(item, string_limit, list_limit) for key, item in value.items()}
+        if isinstance(value, list):
+            return [trim(item, string_limit, list_limit) for item in value[:list_limit]]
+        if isinstance(value, str) and len(value) > string_limit:
+            return value[:string_limit] + "…"
+        return value
+
+    serialized = ""
+    for string_limit in (1200, 600, 300, 150, 80):
+        bounded = trim(bounded, string_limit)
+        serialized = json.dumps(bounded, ensure_ascii=False, separators=(",", ":"))
+        if len(serialized) <= max_chars:
+            return serialized
+
+    # If even compact fields exceed the budget, remove complete evidence records.
+    while len(serialized) > max_chars:
+        collections = [
+            (len(value), key) for key, value in bounded.items()
+            if isinstance(bounded, dict) and isinstance(value, list) and value
+        ]
+        if not collections:
+            return json.dumps({"evidence_truncated": True}, ensure_ascii=False, separators=(",", ":"))
+        _, key = max(collections)
+        bounded[key].pop()
+        serialized = json.dumps(bounded, ensure_ascii=False, separators=(",", ":"))
+    return serialized
+
+
 def private_qa_sources(question: str) -> tuple[str, str | None]:
     """Return compact, read-only evidence for a private Q&A turn.
 
@@ -1611,7 +1645,13 @@ def private_qa_sources(question: str) -> tuple[str, str | None]:
         except Exception:
             log.info("No imported exam records available for general private Q&A context.")
         evidence_text = json.dumps(evidence, ensure_ascii=False)
-    return evidence_text[:26000], schedule_answer
+    # Keep the evidence valid JSON so citation validation can inspect the exact
+    # records supplied to the model. Never slice the serialized JSON string.
+    try:
+        evidence_payload = json.loads(evidence_text)
+    except (TypeError, ValueError):
+        evidence_payload = {"evidence_unavailable": True}
+    return _bounded_evidence_json(evidence_payload, max_chars=26000), schedule_answer
 
 
 async def answer_private_question(question: str, user_id: int, context_text: str = "") -> str:
