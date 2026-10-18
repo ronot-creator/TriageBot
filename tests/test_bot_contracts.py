@@ -353,11 +353,6 @@ class PrivateQuestionHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("تم إرسال استفسارك" in text for text in replies))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
-
 class BoundedEvidenceSerializationTests(unittest.TestCase):
     def test_large_evidence_is_valid_json_and_within_budget(self):
         evidence = {
@@ -401,3 +396,8 @@ class BoundedEvidenceSerializationTests(unittest.TestCase):
 
         self.assertEqual(parsed["faqs"][0]["id"], 17)
         self.assertEqual(parsed["timetable_records"][0]["source_key"], "sha256-source-key")
+
+
+
+if __name__ == "__main__":
+    unittest.main()
