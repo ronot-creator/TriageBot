@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib
 import os
 import sys
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -354,3 +355,49 @@ class PrivateQuestionHandlerTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class BoundedEvidenceSerializationTests(unittest.TestCase):
+    def test_large_evidence_is_valid_json_and_within_budget(self):
+        evidence = {
+            "faqs": [
+                {"id": index, "question": "q" * 1200, "answer": "a" * 1600}
+                for index in range(80)
+            ],
+            "approved_announcements": [
+                {"id": index, "summary": "s" * 1200, "original_text": "o" * 1800}
+                for index in range(40)
+            ],
+            "activity_updates": [
+                {"id": index, "details": "d" * 1500}
+                for index in range(60)
+            ],
+            "timetable_records": [
+                {"source_key": f"source-{index}", "source": "t" * 1200}
+                for index in range(60)
+            ],
+            "exam_records": [
+                {"source_key": f"exam-{index}", "source": "e" * 1200}
+                for index in range(60)
+            ],
+        }
+
+        serialized = BOT._bounded_evidence_json(evidence, max_chars=26000)
+
+        self.assertLessEqual(len(serialized), 26000)
+        parsed = json.loads(serialized)
+        self.assertIsInstance(parsed, dict)
+        self.assertIn("faqs", parsed)
+        self.assertIn("timetable_records", parsed)
+
+    def test_source_identifiers_survive_normal_bounding(self):
+        evidence = {
+            "faqs": [{"id": 17, "question": "When?", "answer": "Not confirmed."}],
+            "timetable_records": [{"source_key": "sha256-source-key", "activity": "Anatomy"}],
+        }
+
+        parsed = json.loads(BOT._bounded_evidence_json(evidence))
+
+        self.assertEqual(parsed["faqs"][0]["id"], 17)
+        self.assertEqual(parsed["timetable_records"][0]["source_key"], "sha256-source-key")
